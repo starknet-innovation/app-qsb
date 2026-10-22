@@ -174,6 +174,11 @@ name from the `origin` remote, so add one before running it. Its
 `app_load_params` check fails until the app is registered in
 `LedgerHQ/ledger-app-database`.
 
+On GitHub, [`ci.yml`](.github/workflows/ci.yml) runs all of this in the same
+image on every push. Ledger's reusable workflows (the other three files) run
+only by hand until the organization's Actions policy allows
+`LedgerHQ/ledger-app-workflows`.
+
 ## Use with the QSB SDK
 
 `LedgerQsbSigner` has the shape of the SDK's `Signer` (`sdk/signer.ts`):
@@ -216,3 +221,9 @@ Ledger signer option yet; its `external` signer mode works with this client.
   vault source, a bridge entry point that builds the script from commitments,
   `bridge.assemble` taking the 15 preimages, and the service-side duplicate-root
   and reveal-set checks.
+
+## License
+
+[Apache-2.0](LICENSE). `app/build.rs` is adapted from
+[LedgerHQ/app-boilerplate-rust](https://github.com/LedgerHQ/app-boilerplate-rust),
+also Apache-2.0.

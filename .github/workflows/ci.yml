@@ -1,0 +1,84 @@
+name: Build and test on Speculos
+
+# Builds every device, runs the Ragger functional tests on Speculos, and runs
+# the formatting, clippy and Ledger guideline checks, all inside Ledger's own
+# builder image. This does what Ledger's reusable workflows do, without calling
+# LedgerHQ/ledger-app-workflows, which the organization's Actions policy doesn't
+# allow (see the note in build_and_functional_tests.yml).
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: Format and clippy
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo fmt
+        working-directory: app
+        run: cargo fmt --check
+      - name: cargo clippy, every device
+        working-directory: app
+        run: |
+          for device in nanosplus nanox stax flex apex_p; do
+            cargo clippy --target "$device" -- -Dwarnings
+          done
+
+  build_and_test:
+    name: Build and test (${{ matrix.device }})
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { device: nanosplus, ragger: nanosp }
+          - { device: nanox, ragger: nanox }
+          - { device: stax, ragger: stax }
+          - { device: flex, ragger: flex }
+          - { device: apex_p, ragger: apex_p }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: app
+        run: cargo ledger build ${{ matrix.device }}
+      - name: Functional tests on Speculos
+        run: |
+          # Ragger finds the project root by its .git directory.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # The image's Python tools (Speculos, Ragger) live in this venv.
+          source /opt/venv/bin/activate
+          pip install -r tests/standalone/requirements.txt
+          pytest tests/standalone --tb=short -v --device ${{ matrix.ragger }}
+
+  guidelines:
+    name: Ledger guideline checks
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest
+    steps:
+      - uses: actions/checkout@v4
+      # The enforcer's app_load_params check is left out: it fails until the app
+      # is registered in LedgerHQ/ledger-app-database (and, for the SLIP-21
+      # label, until the enforcer reads path_slip21 from Rust apps).
+      - name: Icons, app metadata and README
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          for check in icons makefile readme; do
+            /opt/enforcer.sh -a "$GITHUB_WORKSPACE" -c "$check"
+          done

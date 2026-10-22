@@ -3,14 +3,14 @@ name: Run coding style check
 permissions:
   contents: read
 
+# Ledger's reusable workflows (LedgerHQ/ledger-app-workflows) are what Ledger
+# runs for app submissions. The starknet-innovation Actions policy doesn't allow
+# workflows from outside the organization yet, so this one only runs by hand;
+# ci.yml does the same work on every push. Once an org admin allowlists
+# LedgerHQ/ledger-app-workflows/*, restore the push and pull_request triggers.
+
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-      - main
-      - develop
-  pull_request:
 
 jobs:
   check_linting:
