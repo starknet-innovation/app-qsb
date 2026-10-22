@@ -1,0 +1,19 @@
+[target.nanosplus]
+runner = "speculos -m nanosp"
+
+[build]
+target = "nanosplus"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+# The heap defaults to 8192 bytes. A signing session (about 2.1 kB) and the
+# review strings are its only allocations.
+# Authorized values are [2048, 4096, 8192, 16384, 24576].
+#[env]
+#HEAP_SIZE = "8192"

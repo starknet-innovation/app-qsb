@@ -1,0 +1,13 @@
+target/
+app/glyphs/home_nano_nbgl.png
+clients/js/node_modules/
+clients/js/dist/
+tests/standalone/snapshots-tmp/
+__pycache__/
+.venv/
+*.pyc
+.DS_Store
+.env
+.env.*
+*.pem
+*.key
