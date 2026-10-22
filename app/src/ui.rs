@@ -18,6 +18,7 @@ use ledger_device_sdk::nbgl::{
 use qsb_core::address;
 use qsb_core::amount::format_btc;
 use qsb_core::hors::{self, RevealRequest, Vault, NET_MAINNET, REVEALED, ROUNDS};
+use qsb_core::path::{AddressType, Path, HARDENED};
 use qsb_core::session::{Kind, Review};
 use qsb_core::signin::SignIn;
 
@@ -151,10 +152,37 @@ pub fn review_sign_in(comm: &mut Comm, sign_in: &SignIn, address: &str) -> bool 
 }
 
 /// Show the wallet address for the user to compare. Returns whether they confirmed it.
-pub fn verify_address(comm: &mut Comm, address: &str) -> bool {
+/// Show the wallet address, with its type and derivation path, for the user to
+/// compare. Returns whether they confirmed it. (Since SDK v27.1.3 NBGL rejects
+/// a review that has no tag/value list, so the details are not optional.)
+pub fn verify_address(comm: &mut Comm, address: &str, path: &Path) -> bool {
+    let kind = match path.address_type() {
+        AddressType::P2wpkh => "Native SegWit (BIP-84)",
+        AddressType::P2shP2wpkh => "Nested SegWit (BIP-49)",
+    };
+    let mut derivation = String::from("m");
+    for &e in &path.elements {
+        let hardened = e & HARDENED != 0;
+        derivation.push_str(&format!(
+            "/{}{}",
+            e & !HARDENED,
+            if hardened { "'" } else { "" }
+        ));
+    }
+    let details = [
+        Field {
+            name: "Type",
+            value: kind,
+        },
+        Field {
+            name: "Path",
+            value: derivation.as_str(),
+        },
+    ];
     NbglAddressReview::new()
         .glyph(&QSB_SMALL)
         .review_title("Verify QSB\nwallet address")
+        .set_tag_value_list(&details)
         .show(comm, address)
 }
 

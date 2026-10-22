@@ -15,7 +15,7 @@ pub fn handle(command: Command<'_>, display: bool) -> Result<CommandResponse<'_>
     let address = wallet.address::<DeviceHashes>();
 
     let comm = command.into_comm();
-    if display && !ui::verify_address(comm, address.as_str()) {
+    if display && !ui::verify_address(comm, address.as_str(), &path) {
         return Err(AppSW::Deny);
     }
     let mut response = comm.begin_response();

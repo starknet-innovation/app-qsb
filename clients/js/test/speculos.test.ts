@@ -70,7 +70,7 @@ async function approve(pattern: RegExp): Promise<string[]> {
 async function home() {
   for (let i = 0; i < 40; i++) {
     await sleep(250);
-    if ((await screen()).some((l) => l.startsWith("Clear-sign QSB"))) return;
+    if ((await screen()).some((l) => l.startsWith("QSB vault deposits"))) return;
   }
   throw new Error("The app did not return home.");
 }

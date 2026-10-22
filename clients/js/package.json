@@ -36,6 +36,7 @@
     "typescript": "^5.9.0"
   },
   "overrides": {
+    "axios": "1.20.0",
     "bitcoinjs-lib": "7.0.2"
   }
 }
