@@ -7,7 +7,7 @@ addresses and signature checks.
 
 import hashlib
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
 from ecdsa import SECP256k1, VerifyingKey

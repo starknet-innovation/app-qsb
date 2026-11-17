@@ -1,0 +1,19 @@
+[package]
+name = "pqb-core"
+version = "0.1.0"
+edition = "2021"
+description = "Device-independent logic of the PQB Ledger app: the PQB-v1 derivation profile, the vault script template, streaming transaction parsing, persistent allocation and disclosure records, and the deposit and withdrawal state machines."
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+sha2 = "0.10"
+ripemd = "0.1"
+k256 = { version = "0.13", features = ["ecdsa"] }
+bitcoin = "0.32"
+hex = "0.4"
+base64 = "0.22"
+hmac = "0.12"
+

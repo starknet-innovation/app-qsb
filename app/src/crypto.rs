@@ -1,23 +1,24 @@
-//! The secure element's hashes, key derivation and signing.
+//! The secure element's hashes, key derivation, curve arithmetic and signing.
 
-use ledger_device_sdk::ecc::{Secp256k1, Secret, SeedDerive};
+use ledger_device_sdk::ecc::{bip32_derive, CurvesId, EcPoint, Secp256k1, Secret};
 use ledger_device_sdk::hash::{ripemd::Ripemd160, sha2::Sha2_256, HashInit};
-use ledger_device_sdk::hmac::{sha2::Sha2_256 as HmacSha256, HMACInit};
+use ledger_device_sdk::hmac::{
+    sha2::Sha2_256 as HmacSha256, sha2::Sha2_512 as HmacSha512, HMACInit,
+};
 use ledger_device_sdk::sys;
-use qsb_core::der::{normalize_low_s, DerSignature};
-use qsb_core::hash::{Hashes, Sha256};
-use qsb_core::path::Path;
-use qsb_core::wallet::Wallet;
+use pqb_core::der::{normalize_low_s, DerSignature};
+use pqb_core::hash::{Hashes, Sha256};
+use pqb_core::pqb::{self, Curve, Vault};
 
 use crate::AppSW;
 
 // The cx hash calls only fail on invalid arguments (a bad context or output
 // length), which this code never passes. Should one fail anyway, the app panics:
-// the panic handler answers 0xE000 and exits, so nothing is signed.
+// the panic handler answers 0xE000 and exits, so nothing is signed or released.
 
 pub struct DeviceSha256(Sha2_256);
 
-// A context keeps the last message block it hashed, which can be a HORS secret:
+// A context keeps the last message block it hashed, which can be a secret:
 // wipe it however it ends.
 impl Drop for DeviceSha256 {
     fn drop(&mut self) {
@@ -73,6 +74,47 @@ impl Hashes for DeviceHashes {
         }
         out
     }
+
+    fn hmac_sha512(key: &[u8], message: &[u8]) -> [u8; 64] {
+        let mut mac = HmacSha512::new(key);
+        let mut out = [0u8; 64];
+        let ok = mac.update(message).is_ok() && mac.finalize(&mut out) == Ok(64);
+        wipe(&mut mac);
+        if !ok {
+            panic!("hmac");
+        }
+        out
+    }
+}
+
+/// The secure element's secp256k1.
+pub struct DeviceCurve;
+
+impl Curve for DeviceCurve {
+    fn pubkey(d: &[u8; 32]) -> [u8; 33] {
+        let key = Secp256k1::from(d);
+        let Ok(point) = key.public_key() else {
+            panic!("pubkey");
+        };
+        let p = point.pubkey;
+        // 0x04 || X || Y → (0x02 | parity of Y) || X
+        let mut compressed = [0u8; 33];
+        compressed[0] = 0x02 | (p[64] & 1);
+        compressed[1..].copy_from_slice(&p[1..33]);
+        compressed
+    }
+
+    fn mul(point: &[u8; 65], k: &[u8; 32]) -> Option<[u8; 65]> {
+        let mut p = EcPoint::new(CurvesId::Secp256k1).ok()?;
+        p.init(&point[1..33], &point[33..]).ok()?;
+        // Randomised: the scalar is derived from a menu secret.
+        p.rnd_scalarmul(k).ok()?;
+        let mut out = [0u8; 65];
+        out[0] = 0x04;
+        let (x, y) = out[1..].split_at_mut(32);
+        p.export(x, y).ok()?;
+        Some(out)
+    }
 }
 
 /// Overwrite `value` with zeros in a way the compiler can't drop.
@@ -81,65 +123,48 @@ pub fn wipe<T>(value: &mut T) {
     unsafe { sys::explicit_bzero((value as *mut T).cast(), core::mem::size_of::<T>()) };
 }
 
-/// The SLIP-0021 path for the label "QSB-HORS": `0x00 || label`.
-const HORS_LABEL: &[u8] = b"\x00QSB-HORS";
-
-/// `K`, the SLIP-0021 key the HORS secrets are derived from (`qsb_core::hors`).
-/// The label is declared in the install parameters (`path_slip21`); the OS
-/// refuses any other. Zeroized when dropped.
-pub fn hors_key() -> Result<Secret<32>, AppSW> {
-    // The OS reads the path as u32s and checks 4 bytes per path byte: keep it
-    // aligned and that long.
-    let mut path = [0u32; HORS_LABEL.len()];
-    // SAFETY: `path` holds 4 × 9 bytes, more than the 9 copied.
-    unsafe {
-        core::ptr::copy_nonoverlapping(
-            HORS_LABEL.as_ptr(),
-            path.as_mut_ptr().cast::<u8>(),
-            HORS_LABEL.len(),
-        );
-    }
-    // The OS writes SLIP-0021's Key(N), the node's last 32 bytes, to the first
-    // 32 bytes of a 64-byte buffer (as Speculos and the Ledger Bitcoin app agree).
+/// The vault seed S of vault `v`: BIP 85 child entropy at m/83696968'/39'/0'/24'/v',
+/// bound to mainnet. The path prefix is declared in the install parameters.
+pub fn vault_seed(v: u32) -> Result<[u8; 32], AppSW> {
     let mut node = Secret::<64>::new();
-    // SAFETY: the buffers are as long as the OS requires; the curve is ignored for SLIP-21.
-    unsafe {
-        sys::os_perso_derive_node_with_seed_key(
-            sys::HDW_SLIP21,
-            sys::CX_CURVE_SECP256K1,
-            path.as_ptr(),
-            HORS_LABEL.len() as u32,
-            node.as_mut().as_mut_ptr(),
-            core::ptr::null_mut(),
-            core::ptr::null_mut(),
-            0,
-        );
-    }
-    let mut key = Secret::<32>::new();
-    key.as_mut().copy_from_slice(&node.as_ref()[..32]);
+    bip32_derive(
+        CurvesId::Secp256k1,
+        &pqb::bip85_path(v),
+        node.as_mut(),
+        None,
+    )
+    .map_err(|_| AppSW::KeyDeriveFail)?;
+    let mut k = [0u8; 32];
+    k.copy_from_slice(&node.as_ref()[..32]);
     // The OS throws (and the app exits) on a failed derivation; a key of zeros
     // would still mean something went wrong.
-    if key.as_ref().iter().all(|&b| b == 0) {
+    if k.iter().all(|&b| b == 0) {
         return Err(AppSW::KeyDeriveFail);
     }
-    Ok(key)
+    let mut e = pqb::child_entropy::<DeviceHashes>(&k);
+    wipe(&mut k);
+    let s = pqb::vault_seed::<DeviceHashes>(&e);
+    wipe(&mut e);
+    Ok(s)
 }
 
-/// The wallet at `path`, which `qsb_core::path::parse` has already validated:
-/// the SDK's derivation does not report errors.
-pub fn wallet(path: &Path) -> Result<Wallet, AppSW> {
-    let key = Secp256k1::derive_from_path(&path.elements);
-    let point = key.public_key().map_err(|_| AppSW::KeyDeriveFail)?.pubkey;
-    // 0x04 || X || Y → (0x02 | parity of Y) || X
-    let mut compressed = [0u8; 33];
-    compressed[0] = 0x02 | (point[64] & 1);
-    compressed[1..].copy_from_slice(&point[1..33]);
-    Ok(Wallet::new::<DeviceHashes>(compressed, path.address_type()))
+/// Vault `v`'s key set.
+pub fn vault(v: u32) -> Result<Vault, AppSW> {
+    Ok(Vault::new::<DeviceHashes, DeviceCurve>(vault_seed(v)?))
 }
 
-/// ECDSA (RFC 6979) signature of `digest` by the key at `path`, DER, low S.
-pub fn sign(path: &Path, digest: &[u8; 32]) -> Result<DerSignature, AppSW> {
-    let (sig, len, _) = Secp256k1::derive_from_path(&path.elements)
+/// This seed's record key.
+pub fn wallet_id() -> Result<[u8; 16], AppSW> {
+    let mut s0 = vault_seed(0)?;
+    let id = pqb::wallet_id::<DeviceHashes>(&s0);
+    wipe(&mut s0);
+    Ok(id)
+}
+
+/// ECDSA (RFC 6979) signature of `digest` by the private key `d`, DER, low S.
+pub fn sign(d: &[u8; 32], digest: &[u8; 32]) -> Result<DerSignature, AppSW> {
+    let key = Secp256k1::from(d);
+    let (sig, len, _) = key
         .deterministic_sign(digest)
         .map_err(|_| AppSW::SignFail)?;
     let der = sig.get(..len as usize).ok_or(AppSW::SignFail)?;

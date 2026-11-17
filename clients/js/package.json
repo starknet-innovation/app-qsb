@@ -1,7 +1,7 @@
 {
-  "name": "@qsb/ledger",
+  "name": "@pqb/ledger",
   "version": "0.1.0",
-  "description": "Host client for the QSB Ledger app, including a Signer for the QSB SDK and CLI.",
+  "description": "Host client for the PQB Ledger app: vault commitments and scripts, deposit signing, verified disclosures, and the BIP recovery manifest.",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -20,23 +20,20 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "gen:template": "node scripts/gen-template.mjs"
   },
   "dependencies": {
-    "@noble/hashes": "^2.0.0",
-    "@scure/base": "^2.4.0",
-    "@scure/btc-signer": "2.4.1"
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.0.0"
   },
   "devDependencies": {
     "@ledgerhq/hw-transport-node-speculos-http": "^6.36.0",
-    "@noble/curves": "^2.4.0",
     "@types/node": "^22.0.0",
-    "bip322-js": "4.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   },
   "overrides": {
-    "axios": "1.20.0",
-    "bitcoinjs-lib": "7.0.2"
+    "axios": "1.20.0"
   }
 }

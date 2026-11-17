@@ -1,102 +1,85 @@
-"""Transactions for the tests, built around the device's own wallet key."""
+"""Transactions and expected values for the PQB tests, built from the reference (pqb.py)."""
 
-from pathlib import Path
-from typing import List, Tuple
+from functools import lru_cache
+from typing import List, Sequence, Tuple
 
-from .bitcoin import Tx, TxIn, TxOut, sha256
+from . import pqb
+from .bitcoin import Tx, TxIn, TxOut, address, sha256
+from .pqb_command_sender import WithdrawRequest
 
-FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+# Destinations that aren't the vault: a P2TR and a P2WPKH output.
+P2TR_DESTINATION = bytes.fromhex("5120a60869f0dbcf1dc659c9cecbaf8050135ea9e8cdc487053f1dc6880949dc684c")
+P2WPKH_DESTINATION = bytes.fromhex("0014") + bytes(range(20))
 
-P2WPKH_PATH = "m/84'/0'/0'/0/0"
-NESTED_PATH = "m/49'/0'/0'/0/0"
-
-# A destination that isn't the wallet: a P2TR output.
-P2TR_DESTINATION = bytes.fromhex("5120") + bytes(range(32))
-
-
-def fixture(name: str) -> bytes:
-    return bytes.fromhex((FIXTURES / name).read_text().strip())
-
-
-def vault_script() -> bytes:
-    """A Config A vault script generated with qsb-app's pipeline (seed 2)."""
-    return fixture("vault-seed2.hex")
+# A valid selection: 8 + 9 ascending indices below 109, disjoint; picks below 12, 16, 16.
+ROUND0 = [0, 3, 9, 27, 40, 64, 100, 108]
+ROUND1 = [1, 2, 4, 5, 33, 50, 77, 99, 107]
+PICKS = [11, 0, 15]
 
 
-def strip_witness(raw: bytes) -> bytes:
-    """Legacy serialization of a SegWit transaction (marker, flag and witnesses removed)."""
-    if raw[4] != 0:
-        return raw
-    pos = 6
-
-    def varint() -> int:
-        nonlocal pos
-        first = raw[pos]
-        pos += 1
-        if first < 0xFD:
-            return first
-        size = {0xFD: 2, 0xFE: 4, 0xFF: 8}[first]
-        value = int.from_bytes(raw[pos:pos + size], "little")
-        pos += size
-        return value
-
-    def skip(n: int) -> None:
-        nonlocal pos
-        pos += n
-
-    # Not `pos += varint()`: that adds to the value of `pos` from before the read.
-    n_in = varint()
-    for _ in range(n_in):
-        skip(36)
-        skip(varint())
-        skip(4)
-    for _ in range(varint()):
-        skip(8)
-        skip(varint())
-    body_end = pos
-    for _ in range(n_in):
-        for _ in range(varint()):
-            skip(varint())
-    assert pos + 4 == len(raw), "malformed SegWit transaction"
-    return raw[:4] + raw[6:body_end] + raw[pos:]
+@lru_cache(maxsize=None)
+def seed(v: int) -> bytes:
+    return pqb.device_seed(v)
 
 
-def mainnet_deposit() -> bytes:
-    """qsb-app's first mainnet deposit, 1378dd5c…: output 0 is a real vault."""
-    return strip_witness(fixture("mainnet-deposit.hex"))
+@lru_cache(maxsize=None)
+def commitments(v: int) -> Tuple[bytes, ...]:
+    return tuple(pqb.commitments(seed(v)))
 
 
-MAINNET_VAULT_FINGERPRINT = "5f7a0bc1bf0fa932d95ad2dd9b60104dbbebb1f7b42ee5f1f2d58c344525290e"
+@lru_cache(maxsize=None)
+def root(v: int) -> bytes:
+    return pqb.root(seed(v), list(commitments(v)))
 
 
-def funding(script: bytes, value: int, salt: int) -> Tx:
-    """A transaction from an arbitrary outpoint paying `value` to `script` at output 0."""
-    return Tx(
-        version=2,
-        inputs=[TxIn(sha256(bytes([salt])), 1, 0xFFFFFFFD, b"")],
-        outputs=[TxOut(value, script), TxOut(1_000, bytes.fromhex("0014") + bytes([salt]) * 20)],
-    )
+@lru_cache(maxsize=None)
+def script(v: int) -> bytes:
+    return pqb.script(seed(v), list(commitments(v)))
 
 
-def deposit(wallet: bytes, values: List[int], amount: int, change: int) -> Tuple[Tx, List[bytes]]:
-    """A deposit of `amount` into the vault, spending wallet UTXOs of `values`."""
-    prevs = [funding(wallet, v, i) for i, v in enumerate(values)]
-    outputs = [TxOut(amount, vault_script())]
-    if change:
-        outputs.append(TxOut(change, wallet))
-    tx = Tx(2, [TxIn(p.txid(), 0) for p in prevs], outputs)
+def script_hash(v: int) -> bytes:
+    return sha256(script(v))
+
+
+@lru_cache(maxsize=None)
+def deposit_script(v: int) -> bytes:
+    return pqb.deposit_script(seed(v))
+
+
+def deposit_pubkey(v: int) -> bytes:
+    return pqb.deposit_key(seed(v))[1]
+
+
+def deposit_address(v: int) -> str:
+    return address(deposit_script(v))
+
+
+def funding(script_pubkey: bytes, value: int, salt: int, vout: int = 0) -> Tx:
+    """A transaction from an arbitrary outpoint paying `value` to `script_pubkey` at output `vout`."""
+    outputs = [TxOut(1_000 + salt, bytes.fromhex("0014") + bytes([salt]) * 20) for _ in range(vout)]
+    outputs.append(TxOut(value, script_pubkey))
+    outputs.append(TxOut(2_000, bytes.fromhex("0014") + bytes([salt ^ 0xFF]) * 20))
+    return Tx(version=2, inputs=[TxIn(sha256(bytes([salt, vout])), 1, 0xFFFFFFFD)], outputs=outputs)
+
+
+def sweep(v: int, values: Sequence[int], amount: int, salt: int = 0,
+          to: bytes = b"") -> Tuple[Tx, List[bytes]]:
+    """A sweep of deposit UTXOs of `values` into vault `v` (or into `to`)."""
+    prevs = [funding(deposit_script(v), value, salt + i) for i, value in enumerate(values)]
+    tx = Tx(2, [TxIn(p.txid(), 0, 0xFFFFFFFD) for p in prevs], [TxOut(amount, to or script(v))])
     return tx, [p.serialize() for p in prevs]
 
 
-def withdrawal(wallet: bytes, helper: int, destination: bytes, amount: int) -> Tuple[Tx, List[bytes], int]:
-    """A withdrawal of the mainnet vault (100,000 sats) plus a wallet helper UTXO."""
-    helper_prev = funding(wallet, helper, 7)
-    vault_prev = mainnet_deposit()
-    vault_txid = sha256(sha256(vault_prev))
-    tx = Tx(
-        version=1,
-        inputs=[TxIn(helper_prev.txid(), 0, 0xFFFFFFFE), TxIn(vault_txid, 0, 0x800007A1)],
-        outputs=[TxOut(amount, destination)],
-        locktime=950_229_240,
+def refund(v: int, values: Sequence[int], outputs: List[TxOut], salt: int = 0x40) -> Tuple[Tx, List[bytes]]:
+    prevs = [funding(deposit_script(v), value, salt + i) for i, value in enumerate(values)]
+    tx = Tx(2, [TxIn(p.txid(), 0, 0xFFFFFFFD) for p in prevs], outputs)
+    return tx, [p.serialize() for p in prevs]
+
+
+def withdrawal(v: int, prev: Tx, vout: int, outputs: List[TxOut], round0: Sequence[int] = ROUND0,
+               round1: Sequence[int] = ROUND1, picks: Sequence[int] = PICKS, **kw) -> WithdrawRequest:
+    return WithdrawRequest(
+        v=v, prev_tx=prev.serialize(), vout=vout,
+        outputs=b"".join(o.serialize() for o in outputs), n_outputs=len(outputs),
+        round0=list(round0), round1=list(round1), picks=list(picks), **kw,
     )
-    return tx, [helper_prev.serialize(), vault_prev], 100_000

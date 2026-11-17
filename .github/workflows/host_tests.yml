@@ -1,6 +1,6 @@
 name: Host tests
 
-# The device-independent core (qsb-core) and the TypeScript client, on the host.
+# The device-independent core (pqb-core), the TypeScript client and the pqb adapter, on the host.
 
 permissions:
   contents: read
@@ -15,12 +15,12 @@ on:
   pull_request:
 
 jobs:
-  qsb_core:
-    name: qsb-core unit tests
+  pqb_core:
+    name: pqb-core unit tests
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: qsb-core
+        working-directory: pqb-core
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -44,3 +44,20 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  python_adapter:
+    name: pqb adapter (clients/python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Installs pqb from GitHub at the commit pyproject.toml pins.
+      - run: pip install -e '.[dev]'
+      - run: flake8 src tests
+      - working-directory: clients/python/tests
+        run: python -W ignore::ResourceWarning -m unittest -v test_device

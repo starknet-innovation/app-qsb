@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pqb-ledger"
+version = "0.2.0"
+description = "Use pqb vaults whose secrets the PQB Ledger app holds: device-held locks, solver export from device menu points, and spends from the device's one disclosure."
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+# pqb, pinned to the commit this adapter was checked against (pqb_ledger.PQB_COMMIT). pqb pins
+# coincurve itself.
+dependencies = [
+    "pqbitcoin @ git+https://github.com/fireblocks-labs/pqb.git@bb2ddcad5b43ca5c603b3c4054c334cde7e19c47#subdirectory=pqb",
+]
+
+[project.optional-dependencies]
+usb = ["ledgercomm[hid]"]
+dev = ["flake8==7.1.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

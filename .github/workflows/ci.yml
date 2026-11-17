@@ -74,8 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # The enforcer's app_load_params check is left out: it fails until the app
-      # is registered in LedgerHQ/ledger-app-database (and, for the SLIP-21
-      # label, until the enforcer reads path_slip21 from Rust apps).
+      # is registered in LedgerHQ/ledger-app-database.
       - name: Icons, app metadata and README
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"

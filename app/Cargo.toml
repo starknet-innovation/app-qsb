@@ -1,14 +1,14 @@
 [package]
-name = "app-qsb"
-version = "0.1.0"
+name = "app-pqb"
+version = "0.2.0"
 authors = ["Starknet Foundation"]
 edition = "2021"
 license = "Apache-2.0"
-description = "Ledger app for QSB (quantum-safe Bitcoin) vaults: clear-signs deposits, withdrawals and sign-ins, and derives the vaults' HORS secrets, revealing them once per vault."
+description = "Ledger app for PQB (Post-Quantum Bitcoin) vaults: derives each vault's one-time secrets from the seed (BIP 85, profile PQB-v1), signs its funding sweep, and discloses a withdrawal's secrets and co-signature once per vault."
 
 [dependencies]
 ledger_device_sdk = { version = "1.42", features = ["io_new", "sys"] }
-qsb-core = { path = "../qsb-core" }
+pqb-core = { path = "../pqb-core" }
 
 [build-dependencies]
 # Turn the Nano icon and its mask into the home-screen glyph (see build.rs).
@@ -22,17 +22,15 @@ debug = ["ledger_device_sdk/debug"]
 [package.metadata.ledger]
 curve = ["secp256k1"]
 flags = "0"
-# BIP-84 (P2WPKH) and BIP-49 (P2SH-P2WPKH) Bitcoin mainnet accounts only.
-path = ["84'/0'", "49'/0'"]
-# The SLIP-0021 key the HORS secrets are derived from. After changing this,
-# `cargo clean -p ledger_device_sdk`: its build script doesn't rerun on its own.
-path_slip21 = ["QSB-HORS"]
-name = "QSB"
-nanosplus = { icon = "icons/qsb_14x14.gif" }
-nanox = { icon = "icons/qsb_14x14.gif" }
-stax = { icon = "icons/qsb_32x32.gif" }
-flex = { icon = "icons/qsb_40x40.gif" }
-apex_p = { icon = "icons/qsb_32x32.png" }
+# BIP 85, BIP 39 application, English, 24 words: every vault seed derives from
+# m/83696968'/39'/0'/24'/v'. Nothing else: no account key, no SLIP-21 label.
+path = ["83696968'/39'/0'/24'"]
+name = "PQB"
+nanosplus = { icon = "icons/pqb_14x14.gif" }
+nanox = { icon = "icons/pqb_14x14.gif" }
+stax = { icon = "icons/pqb_32x32.gif" }
+flex = { icon = "icons/pqb_40x40.gif" }
+apex_p = { icon = "icons/pqb_32x32.png" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("apex_p", "stax", "flex", "nanox", "nanosplus"))'] }

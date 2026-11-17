@@ -1,259 +1,314 @@
-# QSB app APDU protocol
+# PQB app APDU protocol
 
 All commands use `CLA = 0xE0`. Integers are big-endian unless marked LE. A
-BIP-32 path is serialized as `len (1) || element (4)…`. The app only accepts
-5-element standard paths (see [Paths](#paths)).
+vault is named by its index `v` (4 bytes, below 2^31). The app serves Bitcoin
+mainnet only (`net = main`), and derives every vault from the device seed with
+the BIP's `bip85` source and the `PQB-v1` profile, which targets pqb's
+construction version `v1` (see the README).
 
-| INS    | Command                                | P1                       | P2     |
-| ------ | -------------------------------------- | ------------------------ | ------ |
-| `0x01` | [HORS_GET_VERSION](#hors_get_version)  | `0x00`                   | `0x00` |
-| `0x03` | [GET_VERSION](#get_version)            | `0x00`                   | `0x00` |
-| `0x04` | [GET_APP_NAME](#get_app_name)          | `0x00`                   | `0x00` |
-| `0x05` | [GET_WALLET_ADDRESS](#get_wallet_address) | `0x00` silent, `0x01` show on device | `0x00` |
-| `0x06` | [SIGN_TX](#sign_tx)                    | step, see below          | `0x00` |
-| `0x07` | [SIGN_IN](#sign_in)                    | `0x00` first, `0x80` more | `0x00` |
-| `0x10` | [GET_COMMITMENTS](#get_commitments)    | round, `0x00` or `0x01`  | `0x00` |
-| `0x11` | [GET_COMMITMENT_ROOT](#get_commitment_root) | `0x00` silent, `0x01` show on device | `0x00` |
-| `0x20` | [REVEAL_PREPARE](#reveal_prepare)      | `0x00`                   | `0x00` |
-| `0x21` | [REVEAL_READ](#reveal_read)            | chunk, `0x00` or `0x01`  | `0x00` |
+| INS    | Command                                         | P1                                   | P2     |
+| ------ | ----------------------------------------------- | ------------------------------------ | ------ |
+| `0x03` | [GET_VERSION](#get_version)                     | `0x00`                               | `0x00` |
+| `0x04` | [GET_APP_NAME](#get_app_name)                   | `0x00`                               | `0x00` |
+| `0x10` | [GET_COMMITMENTS](#get_commitments)             | `0x00`                               | `0x00` |
+| `0x11` | [GET_VAULT](#get_vault)                         | `0x00` silent, `0x01` show on device | `0x00` |
+| `0x12` | [GET_SCRIPT](#get_script)                       | `0x00`                               | `0x00` |
+| `0x13` | [GET_DEPOSIT_ADDRESS](#get_deposit_address)     | `0x00` silent, `0x01` show on device | `0x00` |
+| `0x14` | [GET_STATE](#get_state)                         | `0x00` summary, `0x01` one record    | `0x00` |
+| `0x20` | [ALLOCATE](#allocate)                           | `0x00`                               | `0x00` |
+| `0x21` | [RETIRE](#retire)                               | `0x00`                               | `0x00` |
+| `0x30` | [SIGN_DEPOSIT](#sign_deposit)                   | step                                 | `0x00` |
+| `0x40` | [WITHDRAW](#withdraw)                           | step                                 | `0x00` |
+| `0x41` | [REVEAL_READ](#reveal_read)                     | chunk `0x00`–`0x04`                  | `0x00` |
+| `0x42` | [MENU_POINTS](#menu_points)                     | `0x00` authorize, `0x01` read, `0x02` stage `r` | `0x00` |
 
-`0x01` and `0x10`–`0x21` implement the QSB HORS spec ("QSB HORS Ledger App —
-Specification", `QSB-HORS-v1`) and use its status words; see
-[HORS secrets](#hors-secrets).
+## Conformance
 
-## Paths
+The app claims **custody conformance** within one install's history: it is the
+single authoritative writer for each seed it holds, records allocations and
+disclosures in NVM before publishing a script or releasing anything, and fails
+closed on unreadable state. Its continuity guarantee ends with any of: an app
+update or reinstall (Ledger erases the app's NVM), a device reset, or the same
+seed on another device or app. After that the seed has no trustworthy history
+on the device (see [State](#state)).
 
-The wallet is a single address, used by QSB for sign-in, deposits and the
-withdrawal's helper input. The purpose fixes the address type:
-
-| Path                                 | Address type            |
-| ------------------------------------ | ----------------------- |
-| `m/84'/0'/account'/change/index`     | P2WPKH (`bc1q…`)        |
-| `m/49'/0'/account'/change/index`     | P2SH-P2WPKH (`3…`)      |
-
-with `account ≤ 100'`, `change ∈ {0, 1}`, `index ≤ 50000`. Anything else is
-refused with `0xB002`. The app is mainnet only.
+It does **not** verify the three PQB puzzle solutions. Every disclosure is a
+**classically bound, quantum-unverified transaction binding**: the co-signature
+binds it to the displayed transaction against anyone who can't forge ECDSA, not
+against a quantum adversary, and the review says so.
 
 ## GET_VERSION
 
-Response: `major (1) || minor (1) || patch (1)`.
+Response: `major (1) || minor (1) || patch (1) || "PQB-v1"`.
 
 ## GET_APP_NAME
 
-Response: the ASCII app name, `QSB`.
+Response: the ASCII app name, `PQB`.
 
-## GET_WALLET_ADDRESS
+## GET_COMMITMENTS
 
-Data: `path`.
+Data: `v (4) || start (1) || count (1)`, `1 ≤ count ≤ 12`, `start + count ≤ 154`.
 
-Response: `compressed public key (33) || address length (1) || address (ASCII)`.
+Response: `count × 20` bytes, commitments `start..start + count` in root order:
+`c[0..109]`, `m_pin[0..12]`, `m_round0[0..16]`, `m_round1[0..16]`, `q`.
 
-With `P1 = 0x01` the address is shown for the user to compare and the response
-is sent only once they confirm it (`0x6985` if they reject).
+Read-only and allowed for any index: a result is not safe to fund unless
+[GET_VAULT](#get_vault) reports the vault allocated.
 
-## SIGN_TX
+## GET_VAULT
 
-Signs a QSB deposit or the wallet's helper input of a QSB withdrawal. The host
-streams the unsigned transaction in order; the app hashes as it parses and
-keeps only what the review and BIP-143 need. Each step is a separate APDU,
-selected by `P1`:
+Data: `v (4)`.
 
-| P1     | Step      | Data |
-| ------ | --------- | ---- |
-| `0x00` | START     | `kind (1) \|\| path \|\| version (4 LE) \|\| locktime (4 LE) \|\| input count (1) \|\| output count (1)` |
-| `0x01` | INPUT     | `prev txid (32, serialization order) \|\| vout (4 LE) \|\| sequence (4 LE)` |
-| `0x02` | PREVTX    | the next bytes (≤ 255) of the input's previous transaction, witness-stripped |
-| `0x03` | OUTPUTS   | the next bytes (≤ 255) of the serialized outputs, without the output count |
-| `0x04` | REVIEW    | empty |
-| `0x05` | SIGN      | `input index (1)` |
+Response: `R (32) || script hash (32) || status (1) || funded (1)`.
 
-`kind` is `0x01` for a deposit, `0x02` for a withdrawal.
+`R` is the commitment root, the script hash is SHA-256 of the vault's
+4,696-byte locking script. `status`:
 
-Order: `START`, then for each input in order one `INPUT` followed by `PREVTX`
-chunks until that previous transaction is complete, then `OUTPUTS` chunks until
-every output is sent, then `REVIEW`, then one `SIGN` per input to sign.
+| Byte | Meaning |
+| ---- | ------- |
+| `0` | not allocated by this device (in a seed with history) |
+| `1` | allocated |
+| `2` | exposed: a disclosure is recorded |
+| `3` | retired |
+| `4` | unknown: disclosed on the emergency path |
+| `5` | reserved: below the high-water mark, no record (retired and dropped) |
+| `6` | no history: this seed has no trustworthy record on this device |
 
-Session rules:
+`funded` is `1` when a funding output is recorded.
 
-- A new `START` discards any session.
-- Any error ends the session, except a `SIGN` for an input that isn't signable
-  (not the wallet's, or already signed), answered `0xB001` with the approved
-  transaction kept.
-- After approval the device shows "Signing transaction" until the last
-  signable input is signed, then a status screen. Any command other than
-  `SIGN` in between abandons the approved transaction.
+With `P1 = 0x01` the device shows the vault number, the root's fingerprint
+(first 8 bytes in four groups, e.g. `6c37 5dd4 d49e 27a6`) and its status, with
+a warning unless it is allocated and open for funding. `0x6985` if rejected.
 
-**Previous transactions.** Every input's previous transaction is required, in
-the legacy serialization (no SegWit marker, flag or witnesses). The app hashes it
-and checks the result is the outpoint's txid, so the amount and script of the
-spent output are proven rather than claimed. That is what makes the displayed
-fee trustworthy: BIP-143 commits only to the signed input's own amount.
+## GET_SCRIPT
 
-**Deposit** (`kind = 1`): 1–8 inputs, 1–2 outputs.
+Data: `v (4) || offset (2)`, `offset < 4696`.
 
-- Every input must spend the wallet's own address (the path's script).
-- Output 0 must be a QSB vault script (see the README); its fingerprint and
-  amount are shown.
-- Output 1, if present, must pay the wallet's own address (change).
-- Every input is signable.
+Response: bytes `offset..min(offset + 250, 4696)` of the vault's locking script.
 
-**Withdrawal** (`kind = 2`): 2 inputs, 1 output.
+## GET_DEPOSIT_ADDRESS
 
-- Input 0 must spend the wallet's own address (the helper UTXO).
-- Input 1 must spend a QSB vault output. Its HORS scriptSig isn't sent: the
-  helper's BIP-143 signature doesn't cover it.
-- The output must be a standard address type (P2PKH, P2SH, P2WPKH, P2WSH or
-  P2TR); its address, amount and the fee are shown.
-- Only input 0 is signable.
+Data: `v (4)`.
 
-The fee is `Σ inputs − Σ outputs` and must be positive.
+Response: `compressed public key (33) || address length (1) || address (ASCII)`,
+the P2WPKH address of the vault's deposit key `dd`.
 
-`REVIEW` shows the transaction and answers `0x9000` once the user approves, or
-`0x6985` if they reject. Fees above 10% of the value moved add a "High fees
-warning" line to the review. `SIGN` then returns, once per signable input,
-`DER signature || 0x01` (SIGHASH_ALL), the PSBT `partial_sig` value for the
-wallet's public key. The signature is low-S.
+With `P1 = 0x01` the address is shown for comparison, and only for a vault that
+is allocated, never disclosed and not yet funded (`0x6A94` otherwise).
 
-## SIGN_IN
+## GET_STATE
 
-Signs QSB's sign-in challenge with BIP-322 (`POST /api/auth/challenge`). The app
-signs no other message.
+`P1 = 0x00`, no data. Response:
+`wallet id (16) || namespace (1) || next_v (4) || records (1) || capacity (1)`.
 
-| P1     | Data |
-| ------ | ---- |
-| `0x00` | `path \|\| message length (2) \|\| message bytes…` |
-| `0x80` | further message bytes |
+The wallet id is `SHA256("PQB-v1/wallet" || S(v = 0))[0..16)`, naming the seed
+(a BIP-39 passphrase gives another). `namespace` is `0` none, `1` fresh, `2`
+unknown. `records` counts this seed's records. In an unknown namespace,
+emergency records can have `v >= next_v`; a manifest's `next_v` must then be
+raised past every recorded index.
 
-The message is at most 512 bytes. After the last byte the app checks the
-challenge (title, `Network: bitcoin-mainnet`, a UUID nonce, an ISO-8601 expiry,
-the fixed footer, and `Address:` equal to the path's address), shows the origin,
-address and expiry, and on approval returns `DER signature || 0x01` over the
-BIP-322 `to_sign` transaction. Intermediate chunks answer `0x9000` with no data.
-
-The host builds the BIP-322 "simple" encoding from it: the witness
-`[signature, public key]`, serialized and base64-encoded. bip322-js, which
-qsb-app's server uses, accepts it in strict mode for both address types.
-
-The origin must be a web origin, `https://host[:port]` in lowercase (plain
-`http` only for `localhost` or `127.0.0.1`), so nothing can hide in user info or
-a path. The nonce must be a lowercase UUID.
-
-## HORS secrets
-
-The vault's 2 × 150 one-time HORS secrets can be derived on the device
-instead of drawn from `os.urandom` by the QSB client. They are not tied to
-any BIP-32 key:
+`P1 = 0x01`, data `i (1)`: the `i`-th record of this seed, 251 bytes, as stored
+(without the slot's 5 bytes of zero padding):
 
 ```text
-K          = SLIP-0021 key for the label "QSB-HORS" (declared in the app's install parameters)
-s[v][r][i] = HMAC-SHA256(K, "QSB-HORS-v1" ‖ 0x00 ‖ net ‖ v ‖ r ‖ i)[0..20)
-c[v][r][i] = RIPEMD160(SHA256(s))          the commitment qsb-app puts in the vault script
-R[v]       = SHA256("QSB-HORS-v1/root" ‖ c[0][0..150) ‖ c[1][0..150))
+0x01 || wallet id (16) || v (4) || state (1) || flags (1) || R (32) || script hash (32)
+|| funding txid (32, serialization order) || vout (4 LE) || value (8 LE) || sweep input (36)
+|| round0 (8) || round1 (9) || picks (3) || B (32) || D (32)
 ```
 
-`net` is `0x00` for mainnet (`0x01`, test networks, is refused by this
-mainnet build with `0x6A92`), `v` the vault index (u32, below 2^31), `r` the
-round (`0x00`, `0x01`) and `i` the index (u16, below 150). Integers are
-big-endian. `K` is derived per command and wiped before the command returns.
-[`tests/application_client/hors.py`](../tests/application_client/hors.py) is a
-reference implementation.
+`sweep input` is one outpoint (`txid || vout LE`) spent by the sweep that funded
+the vault (see [SIGN_DEPOSIT](#sign_deposit)); zero when the funding was first
+learned from a withdrawal. Unused fields are zero.
 
-### HORS_GET_VERSION
+`state`: `1` allocated, `2` exposed, `3` retired, `4` unknown. `flags`: `0x01`
+funded, `0x02` disclosure recorded, `0x04` emergency. A host builds the BIP's
+portable recovery manifest from these and from GET_SCRIPT.
 
-Response: `major (1) || minor (1) || patch (1) || "QSB-HORS-v1"`.
+## ALLOCATE
 
-### GET_COMMITMENTS
+No data. Response: `v (4) || R (32) || script hash (32)`.
 
-P1 is the round. Data: `net (1) || v (4) || start (2) || count (1, 1–12)`,
-with `start + count ≤ 150`. Response: `count` commitments of 20 bytes. No
-approval: commitments are public. Reading a whole vault takes 13 commands per
-round.
+Reserves the next index `v = next_v` for a new vault. If this seed has no
+namespace on the device yet, the device first asks whether the seed has ever
+held PQB vaults (on any device or app install):
 
-### GET_COMMITMENT_ROOT
+- **Never used**: the namespace starts fresh at `next_v = 0`.
+- **Used before**: the namespace is marked unknown and the allocation refused
+  (`0x6A95`): without its history the device can't tell which indices are safe.
+  New deposits need a fresh root, such as a new BIP-39 passphrase.
 
-Data: `net (1) || v (4)`. Response: `R (32)`. With `P1 = 0x01` the device first
-shows "QSB vault #v", the network and the fingerprint (`R`'s first 8 bytes as
-four groups of hex digits) for the user to compare with the QSB app, and a
-warning not to fund the vault if this device already revealed its secrets;
-`0x6985` if they go back.
+The device then shows the vault number and fingerprint; on approval it records
+the vault `allocated`, raises `next_v` durably, and only then responds. `0x6A96`
+when the record table is full, `0x6A95` in an unknown namespace.
 
-### REVEAL_PREPARE
+## RETIRE
 
-Data: `net (1) || v (4) || round 1 indices (8 × u16) || round 2 indices (7 × u16)
-|| binding (32) || amount in sats (8) || destination script length (1) ||
-destination script (≤ 34)`.
+Data: `v (4)`. The device asks for confirmation, then marks the vault retired:
+it can never disclose again, not even an exact retry. In a fresh namespace the
+record is then dropped (its index stays reserved below `next_v`), freeing room.
 
-Checked before any screen, else `0x6A80`: indices below 150 and distinct within
-a round, the exact length, an amount up to 21 million BTC, and a destination
-the app can show as an address. `binding` is SHA-256 of the unsigned withdrawal
-as the host serialises it; in v1 the device can't check it, or the amount and
-destination, against the indices, so the review labels them host-reported.
+## SIGN_DEPOSIT
 
-The one-time reveal guard then decides, from the record of vaults this device
-has revealed for (64 entries in NVM, oldest dropped first). A record is keyed
-by wallet, network and vault index: the wallet is the tag
-`HMAC-SHA256(K, "QSB-HORS-v1/guard")[0..8)`, so a BIP-39 passphrase's vaults
-(another seed, other secrets) don't collide with the main seed's. If the stored
-record is unreadable the device refuses every reveal (`0x6A93`) rather than
-forget what it recorded.
+Signs with a vault's deposit key: the **sweep** that funds the vault, or a
+**refund** from the deposit address. Every input must spend the deposit
+address; each previous transaction is streamed and hashed to its txid, so
+amounts are proven. Each step is an APDU, selected by `P1`:
 
-| Record for (net, v) | Device |
-| ------------------- | ------ |
-| None | Shows the reveal. On approval it records `SHA256("QSB-HORS-v1/reveal" ‖ indices ‖ binding)`, durably, before answering. When the record is full, it first asks to forget the oldest vault, which lets that vault be revealed again. |
-| Same reveal | Shows "Re-reveal QSB secrets": a failed broadcast can be retried. |
-| A different reveal | Shows that the vault was already spent and answers `0x6A90`. No override. |
+| P1     | Step    | Data |
+| ------ | ------- | ---- |
+| `0x00` | START   | `kind (1) \|\| v (4) \|\| version (4 LE) \|\| locktime (4 LE) \|\| inputs (1) \|\| outputs (1)` |
+| `0x01` | INPUT   | `prev txid (32, serialization order) \|\| vout (4 LE) \|\| sequence (4 LE)` |
+| `0x02` | PREVTX  | the next bytes (≤ 255) of the input's previous transaction, witness-stripped |
+| `0x03` | OUTPUTS | the next bytes (≤ 255) of the serialized outputs, without their count |
+| `0x04` | REVIEW  | empty |
+| `0x05` | SIGN    | `input index (1)` → `DER signature || 0x01` |
 
-`0x9000` means approved: the preimages can be read.
+`kind` `0x01` sweep: 1–8 inputs, exactly one output, which must be this vault's
+locking script (compared by SHA-256 with the script the device derives). The
+vault must be allocated and never disclosed. A vault takes one funding: a sweep
+with another txid is accepted only if it spends an input of the recorded sweep,
+so at most one can confirm (`0x6A90` otherwise). On approval the funding output
+(txid, 0, value) is recorded before any signature is returned.
 
-### REVEAL_READ
+`kind` `0x02` refund: 1–8 inputs, one or two outputs to P2PKH, P2SH, P2WPKH,
+P2WSH or P2TR addresses, one of which may return change to the deposit address.
+Allowed in any vault state, so payments made after a sweep can be recovered.
 
-P1 is the chunk. Response: chunk 0, preimages 1–12 (240 bytes); chunk 1,
-preimages 13–15 (60 bytes), in the order the indices were sent, round 1 first.
-Only after an approved REVEAL_PREPARE, and not after chunk 1 was read, the
-approval timed out (60 seconds of the device's 100 ms ticker, which pauses
-while another screen blocks), a new REVEAL_PREPARE arrived (even one refused
-before any screen) or the app was closed: `0x6A91` otherwise. HORS_GET_VERSION
-and REVEAL_READ take no data.
+Order: START, then for each input one INPUT followed by PREVTX chunks until
+its previous transaction is complete, then OUTPUTS chunks, REVIEW, and one SIGN
+per input. Signatures are BIP-143, SIGHASH_ALL, RFC 6979, low S. A new START
+discards a session; any error ends it, except a SIGN of an input already
+signed (`0xB001`), and any other command while signatures are collected ends it.
 
-### HORS status words
+## WITHDRAW
 
-| SW       | Meaning |
-| -------- | ------- |
-| `0x6A80` | Invalid data: index range, duplicate, length, destination |
-| `0x6A86` | Wrong P1/P2 |
-| `0x6A90` | A different reveal is recorded for this vault |
-| `0x6A91` | REVEAL_READ without an approved REVEAL_PREPARE |
-| `0x6A92` | Network not served by this build |
-| `0x6A93` | The reveal record in NVM is unreadable; reveals are refused (an app extension to the spec) |
-| `0x6985` | Rejected by the user |
+One disclosure of a vault's secrets and the co-signature, for one withdrawal
+transaction `T` with exactly one input, the vault output. Steps, by `P1`:
 
-## Status screens
+| P1     | Step    | Data |
+| ------ | ------- | ---- |
+| `0x00` | START   | `v (4) \|\| version (4 LE) \|\| prev txid (32, serialization order) \|\| vout (4 LE) \|\| sequence (4 LE) \|\| locktime (4 LE) \|\| outputs (1) \|\| round0 (8) \|\| round1 (9) \|\| picks (3)` |
+| `0x01` | PREVTX  | the next bytes (≤ 255) of the transaction that created the vault output, witness-stripped |
+| `0x02` | OUTPUTS | the next bytes (≤ 255) of `T`'s serialized outputs, without their count |
+| `0x03` | REVIEW  | empty |
 
-After a review the device shows a status screen for about three seconds
-("Transaction signed", "Message signed", "Address verified" or the rejection).
-A command that arrives meanwhile is refused with `0x6901` without being
-processed; resend it. The TypeScript client does.
+START is checked before anything else: exactly 8 round-0 and 9 round-1 table
+indices in `[0, 108]`, strictly ascending within each round, none in both;
+`p0 < 12`, `p1 < 16`, `p2 < 16`. Otherwise `0x6A80`. `T` must have 1–4
+outputs (`0xB007` otherwise).
+
+The previous transaction must hash to the outpoint and its output `vout` must be
+vault `v`'s script (`0xB006` otherwise). Each output of `T` must be a standard
+address with a nonzero amount, and the fee (vault value minus outputs) positive.
+
+From these fields the device builds `T` (scriptSig empty, no witness), then
+
+```text
+B = SHA256(T)
+D = SHA256("PQB-v1/reveal" || round0 || round1 || p0 || p1 || p2 || B)
+z = legacy SIGHASH_ALL digest of T's input, scriptCode = the vault script
+```
+
+REVIEW compares this with the vault's record:
+
+| Record | Outcome |
+| ------ | ------- |
+| allocated | first disclosure |
+| exposed, same `R`, script, funding, indices, picks, `B`, `D` | retry: allowed after a fresh approval |
+| exposed, anything different | refused, `0x6A90` |
+| retired | refused, `0x6A94` |
+| not allocated, or reserved | refused, `0x6A94` |
+| no history, or unknown | **emergency path**, outside custody conformance |
+
+The device shows the network, vault number and fingerprint, each destination
+and amount, the fee, what is disclosed (17 of 109 table secrets, 3 menu
+signatures and the co-signature) and the binding warning. The emergency path
+adds a page saying it is outside custody conformance and that a withdrawal sent
+from another device or install would make this one fatal; it records the
+disclosure with the vault's state left `unknown`, so later only the exact same
+disclosure can be retried.
+
+REVIEW answers only once the user decides: `0x9000` with no data on approval,
+`0x6985` on rejection. The same holds for SIGN_DEPOSIT's REVIEW.
+
+On approval the record (state, funding, indices, picks, `B`, `D`) is written to
+NVM before anything leaves; the co-signature is computed by the device over
+`z` with the key `d` (RFC 6979, low S, strict DER, `0x01`). A crash after the
+write consumes the authorization: the host repeats the exact request.
+
+## REVEAL_READ
+
+`P1` = chunk, no data. Only after an approved WITHDRAW, within 60 seconds.
+
+| Chunk | Data |
+| ----- | ---- |
+| `0x00` | `s[j]` for the 8 round-0 indices, in order (8 × 20) |
+| `0x01` | `w[j]` for the first 5 round-1 indices (5 × 32) |
+| `0x02` | `w[j]` for the last 4 round-1 indices (4 × 32) |
+| `0x03` | `len (1) \|\| g[p0] \|\| len (1) \|\| g[p1] \|\| len (1) \|\| g[p2]` (menu signatures, DER `\|\| 0x01`; `len` covers both) |
+| `0x04` | `len (1) \|\| co-signature (DER \|\| 0x01) \|\| Q (33)` (`len` covers DER and `0x01`) |
+
+Chunks can be read again until chunk `0x04` is read, which ends the approval.
+The host must check every preimage and menu signature against its commitment
+and the co-signature against `Q`, `q` and `z`.
+
+## MENU_POINTS
+
+The PQB solver needs, per stage, the points `(r⁻¹·x[i])·R` for each menu scalar
+`x[i]` and each recovery point `R` of the stage's `r`. They hide the scalars only
+under the discrete-log assumption: keep them private to your solver.
+
+`P1 = 0x00`, data `v (4)`: the device asks the user to authorize exporting vault
+`v`'s menu points. The authorization lasts until the app exits or another vault
+is authorized.
+
+`P1 = 0x01`, data `v (4) || stage (1) || variant (1) || start (1) || count (1)`,
+`count ≤ 7`, `start + count ≤ 12` for stage 0 and `≤ 16` for stages 1 and 2.
+`variant` is `add_n << 1 | odd`: `R` has x-coordinate `r + n·add_n` and that
+y parity. Response: `count × 33` compressed points. `0x6A80` if that `R` does
+not exist (for stage 0, `r = 1`, variants 2 and 3 never do), `0x6A97` without
+authorization.
+
+`P1 = 0x02`, data `v (4) || stage (1)`, `stage < 3`: the stage's `r` (32 bytes),
+which the solver needs with its points. In pqb's construction `v1` it is `1` for
+stage 0 and `0x81` for stages 1 and 2; the device reports it so a host need not
+assume the construction. It needs the same authorization (`0x6A97` otherwise):
+the points already determine it.
+
+Exporting points or `r` does not change any vault's state.
+
+## State
+
+The app keeps, per seed (wallet id), a namespace with the allocation high-water
+mark `next_v`, and one record per vault, in 33 NVM slots that are each replaced
+atomically (32 records, 8 seeds). Any unreadable slot makes the app refuse every
+allocation and disclosure (`0x6A93`).
 
 ## Status words
 
 | SW       | Meaning |
 | -------- | ------- |
-| `0x9000` | Success |
+| `0x9000` | OK |
 | `0x6985` | Rejected by the user |
+| `0x6A80` | Invalid data: an index, pick or field out of range |
 | `0x6A86` | Wrong P1/P2 |
 | `0x6A87` | Wrong data length |
-| `0x6D00` | Unknown INS |
+| `0x6A90` | Conflict: a different disclosure or funding is recorded for this vault |
+| `0x6A91` | REVEAL_READ without an approved disclosure, or after it expired |
+| `0x6A93` | Persistent state unreadable: allocation and disclosure refused |
+| `0x6A94` | The vault's state does not allow this |
+| `0x6A95` | No trustworthy history for this seed: no allocation |
+| `0x6A96` | No room for another record |
+| `0x6A97` | Menu points not authorized for this vault |
+| `0x6D00` | Unknown instruction |
 | `0x6E00` | Wrong CLA |
 | `0xB001` | Command out of order |
-| `0xB002` | Path not accepted |
-| `0xB003` | Transaction or script parse error |
-| `0xB004` | Previous transaction doesn't match its txid |
-| `0xB005` | An input that must be the wallet's isn't |
-| `0xB006` | A script that must be a QSB vault isn't |
-| `0xB007` | Not a QSB deposit or withdrawal layout |
-| `0xB008` | Output can't be shown as an address |
-| `0xB009` | Amount overflow or non-positive fee |
-| `0xB00A` | Not a QSB sign-in challenge for this address |
+| `0xB003` | Transaction could not be parsed |
+| `0xB004` | Previous transaction does not match the outpoint |
+| `0xB005` | An input does not spend the vault's deposit address |
+| `0xB006` | Not this vault's locking script |
+| `0xB007` | Unsupported transaction layout |
+| `0xB008` | Output the device cannot show as an address |
+| `0xB009` | Bad amount or non-positive fee |
 | `0xB00B` | Signing failed |
 | `0xB00C` | Key derivation failed |
-| `0x6901` | Not accepted: a status screen is showing; resend |

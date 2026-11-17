@@ -1,16 +1,40 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (unreleased)
 
-- HORS secrets (spec QSB-HORS-v1): derives each vault's 300 one-time secrets
-  from the seed with SLIP-0021 (label `QSB-HORS`), exports their commitments and
-  root, and reveals a withdrawal's 15 preimages once per vault after on-device
-  approval, guarded by a 64-vault record in NVM. New APDUs `0x01`, `0x10`,
-  `0x11`, `0x20`, `0x21`.
-- The wallet address confirmation also shows the address type and derivation
-  path. Since C SDK v27.1.3 NBGL rejects a review without such a list, which
-  made every address confirmation fail.
+Retargeted from QSB to PQB, following the BIP draft "PQB Wallet Secret
+Management" 0.2.0. Not compatible with 0.1.0: the app is now `PQB`.
+
+- Vault seeds derive from the device seed through BIP 85
+  (`m/83696968'/39'/0'/24'/v'`) and the BIP's `PQB-v1` profile: 109 table
+  entries, three signature menus, the ECDSA co-signing key and the deposit key,
+  matching pqb's construction version `v1` (commit `bb2ddca`; seed binding
+  `pqb/vault-seed|hybrid|PQB|v1|real|main`, pinning menu `r = 1`). The BIP draft
+  0.2.0 still names the earlier construction (commit `eccdd09`) and needs the
+  same update. The SLIP-0021 `QSB-HORS-v1` derivation is
+  removed; vaults created with it are not recoverable by this version.
+- The device embeds pqb's 4,696-byte vault script template and builds each
+  vault's exact script; GET_SCRIPT exports it.
+- Persistent allocation and disclosure records (`allocated`, `exposed`,
+  `retired`, `unknown`) with a high-water mark per seed, replacing the 64-entry
+  reveal guard and its eviction. Unreadable state fails closed.
+- Withdrawals: one input, `T` rebuilt on the device, `B` and `D` per the BIP,
+  exact retries only, and the device's own co-signature (legacy SIGHASH_ALL,
+  RFC 6979, low S). Reviews label the binding as classically bound,
+  quantum-unverified; an emergency path for seeds without history is labelled
+  as outside custody conformance.
+- Deposit addresses, the sweep that funds a vault (one funding per vault) and
+  refunds, signed with the vault's deposit key.
+- Menu-point export for the solver, after user authorization, and each stage's
+  `r` (MENU_POINTS `P1 = 0x02`).
+- Removed: BIP-84/49 wallet signing, QSB deposit and helper-input signing, and
+  the QSB sign-in. New APDUs throughout (docs/apdu.md).
+- TypeScript client renamed `@pqb/ledger`, with disclosure verification and the
+  BIP's portable recovery manifest.
+- Python package `pqb_ledger` (clients/python): device-held pqb vaults, solver
+  export and spend assembly through unmodified pqb, pinned to commit `bb2ddca`.
 
 ## 0.1.0
 
 - First version: clear-signs QSB vault deposits, withdrawal helper inputs and sign-in challenges on Nano S+, Nano X, Stax, Flex and Apex P.
+- HORS secrets (spec QSB-HORS-v1) derived with SLIP-0021, revealed once per vault.

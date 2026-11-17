@@ -1,0 +1,126 @@
+{
+  "warning": "Public test fixtures. Never use for funds.",
+  "profile": "PQB-v1",
+  "bip85": {
+    "mnemonic": "install scatter logic circle pencil average fall shoe quantum disease suspect usage",
+    "passphrase": "",
+    "index": 0,
+    "path": "m/83696968'/39'/0'/24'/0'",
+    "child_entropy": "ae131e2312cdc61331542efe0d1077bac5ea803adf24b313a4f0e48e9c51f37f",
+    "vault_seeds": {
+      "main": "b267680d8a1a370e5b7978c725873e36ab66005e6ed25bc0f09c7607e3a2f8f3",
+      "testnet4": "d2cbe422c5526eb2767cf7b99c23422878d94465517cc8e0c4d5ef5c39c58dd1",
+      "regtest": "a21d82431ef143ed97b31f4eb13867c43dcb24b463bb4cd0da8ac152246fa51a"
+    }
+  },
+  "seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "hors": [
+    {
+      "j": 0,
+      "round0": "f40d6eb40093ac0d520116902b07216bb1e3a2d1",
+      "round1": "05227724eae56625de9b15a5fc2b04f96f1bd29b57b4c3f97eadd6f28bbcaeee",
+      "commitment": "be4e7023ab90e2e09e38891393626562c8feeae3"
+    },
+    {
+      "j": 1,
+      "round0": "b7b68874cac5c40a8490a7b51cb294647ea63855",
+      "round1": "b29d2e799950df83982f6f5329420354cef8ec4d70cf098897b66d2b4d62e8d6",
+      "commitment": "52a4e9595d2bdf26e0816014890da84c004dd5c9"
+    },
+    {
+      "j": 108,
+      "round0": "501ae3f8c3e88f77a4a28e62229f39c714c53960",
+      "round1": "776a14aaeacef40eb5fa4a18e843b20b93d5dc04405d7042eead8c1ec80cd054",
+      "commitment": "994314bca665098fec1ac67fba6803534241d126"
+    }
+  ],
+  "menus": [
+    {
+      "stage": 0,
+      "width": 12,
+      "r": "1",
+      "first": {
+        "scalar": "07d91adc196ecf0ed7a8be20cc6d9a93e4a25b083c70f8730144f579179bf67a",
+        "signature": "3025020101022007d91adc196ecf0ed7a8be20cc6d9a93e4a25b083c70f8730144f579179bf67a01",
+        "commitment": "efb6c32994a20a7e211c86d431e74f451f4fb4d2"
+      },
+      "last": {
+        "scalar": "051b6eca14b1d35f5c941a8b9f3584d555abfac303266f37c2081b8e4c25734a",
+        "signature": "30250201010220051b6eca14b1d35f5c941a8b9f3584d555abfac303266f37c2081b8e4c25734a01",
+        "commitment": "d85f3d338692a6d30e99d0213f1f6e17d82c1a38"
+      }
+    },
+    {
+      "stage": 1,
+      "width": 16,
+      "r": "81",
+      "first": {
+        "scalar": "059cdbf0e51a0a555e1b7693d161275b5e5c327dc4bf0c9d0cc4deba56b37c24",
+        "signature": "3026020200810220059cdbf0e51a0a555e1b7693d161275b5e5c327dc4bf0c9d0cc4deba56b37c2401",
+        "commitment": "3ec9d852aa3df4d9eff3c9f787058f9ca361c278"
+      },
+      "last": {
+        "scalar": "078c5d74482fc300e3d47122a23591f395e5b5f2b12e28e9384755209d194894",
+        "signature": "3026020200810220078c5d74482fc300e3d47122a23591f395e5b5f2b12e28e9384755209d19489401",
+        "commitment": "766109b3e9d937e3bcf34200eb87b983548c6b3d"
+      }
+    },
+    {
+      "stage": 2,
+      "width": 16,
+      "r": "81",
+      "first": {
+        "scalar": "07462276eab0ee7b79db83c591bb6ea4d87b596bf2b1c744d47d0aec5307073f",
+        "signature": "302602020081022007462276eab0ee7b79db83c591bb6ea4d87b596bf2b1c744d47d0aec5307073f01",
+        "commitment": "09864f793adea4d1b7b96e72e01a71054adca2bb"
+      },
+      "last": {
+        "scalar": "079d2b7fd40469981575353d2e2b66b7269f7d486f3dde329eb1f21225179d97",
+        "signature": "3026020200810220079d2b7fd40469981575353d2e2b66b7269f7d486f3dde329eb1f21225179d9701",
+        "commitment": "68cc939fa8d49f05f10fcebd166249353a243cd9"
+      }
+    }
+  ],
+  "cosign": {
+    "private_key": "b8f081dcd6b2ac97521d8190c531fe36ad4cc971a2cc4abbdb598868d7c121ef",
+    "public_key": "029442ee174cb4a13c87eaa1bd44ef1c97d5cd6c653eb5892574f071fe676d1f15",
+    "hash160": "e4fe5b5340de7ecf6189051dff97c380386fbebd"
+  },
+  "deposit": {
+    "private_key": "b384656fb00b475de0ffb0d0efd7cda86560a8b7842dd33111e47cbb15a566f1",
+    "public_key": "027a786f248f784ad28ecad291c0b4eb282154a4fe3e60014b848f2c72984beae9",
+    "script_pubkey": "00147f6348ab8818ae35a7cc71b0b6bca04fd9db2f78"
+  },
+  "root": "48629f7b1de16b950bbd36124838bc887b0b1c9e6735bf6c8c6b9214a6a3590d",
+  "disclosure": {
+    "transaction": "020000000111111111111111111111111111111111111111111111111111111111111111110000000000feffff7f01e803000000000000015100f15365",
+    "binding": "503f3b44cb5780fafde67c6c7c94b28e82ca8db2b5a421656a40674bada44022",
+    "round0": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "round1": [
+      100,
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108
+    ],
+    "menu_picks": [
+      11,
+      0,
+      15
+    ],
+    "digest": "90c1d3a01bb988d04525c197d94d8ace1cc421d42363e3df8276761510f6a16a"
+  }
+}

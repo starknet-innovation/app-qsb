@@ -1,152 +1,150 @@
-# QSB Ledger app
+# PQB Ledger app
 
-A Ledger device app, in Rust, for
-[QSB](https://github.com/starknet-innovation/qsb-app) quantum-safe Bitcoin
-vaults. It does two jobs:
+A Ledger device app, in Rust, that holds the signing secrets of
+[PQB](https://github.com/fireblocks-labs/pqb) (Post-Quantum Bitcoin) vaults, as
+specified by the BIP draft "PQB Wallet Secret Management" (profile `PQB-v1`).
 
-- **Clear-signs the wallet side**: the deposit into a vault, the helper input
-  of a withdrawal from a vault, and the QSB service's sign-in challenge. It
-  signs nothing else.
-- **Holds the vaults' HORS secrets** (spec QSB-HORS-v1): derives each vault's
-  300 one-time secrets from the seed, exports only their commitments, and
-  reveals the 15 a withdrawal needs once per vault, after you approve.
+A PQB vault is spent with a hybrid signature: one-time hash preimages that a
+quantum computer does not break, and an ordinary ECDSA co-signature. All of it
+derives from one 32-byte vault seed. This app derives every vault seed from the
+device's own seed, so the Ledger backup is the vault backup, and it keeps the
+history that makes the one-time secrets safe to disclose exactly once.
 
-**Not audited and not submitted to Ledger.** QSB itself is a research
-snapshot that runs on Bitcoin mainnet; treat this app the same way.
+**Not audited and not submitted to Ledger.** PQB is research code that runs on
+Bitcoin mainnet; treat this app the same way.
 
-## What it signs
+## What it does
 
-QSB's wallet is one P2WPKH or nested SegWit (P2SH-P2WPKH) address, used for
-sign-in, deposits and the withdrawal's helper input (qsb-app
-`docs/KEY-CUSTODY.md`). The app holds that key: BIP-84 `m/84'/0'/account'/change/index`
-or BIP-49 `m/49'/0'/…` on mainnet, with the standard limits (account ≤ 100',
-index ≤ 50,000). The vault input's HORS authorization is separate: see
-[HORS secrets](#hors-secrets) for vaults whose secrets the device holds.
-
-| Operation | What the device checks | What it shows |
+| Operation | Command | What the device checks and shows |
 | --- | --- | --- |
-| **Deposit** (`fundingPsbt`) | 1–8 inputs, each spending the wallet's address, each amount proven by its full previous transaction; output 0 is a QSB vault script; an optional output 1 returns change to the wallet; positive fee | Amount, vault fingerprint, fees (and a warning above 10%) |
-| **Withdrawal** (`helperPsbt`) | Input 0 spends the wallet's address; input 1 spends a QSB vault output, proven by the deposit transaction; one output to a P2PKH, P2SH, P2WPKH, P2WSH or P2TR address; positive fee. Signs input 0 only, SIGHASH_ALL | Vault fingerprint, amount, destination address, fees (and a warning above 10%) |
-| **Sign-in** (BIP-322) | The exact challenge template from qsb-app's `server/app.ts`, for `bitcoin-mainnet`, naming the signing address | Origin, address, expiry |
+| **Commitments, script, root** | GET_COMMITMENTS, GET_SCRIPT, GET_VAULT | Derived on the device for any vault index. GET_VAULT can show the root's fingerprint and the vault's recorded status |
+| **Create a vault** | ALLOCATE | Takes the next index (a durable high-water mark), shows "Create PQB vault #v" with its fingerprint, and records it before the script is returned |
+| **Deposit address** | GET_DEPOSIT_ADDRESS | An ordinary P2WPKH address from the vault's deposit key; shown only for an allocated, never-funded vault |
+| **Fund the vault** (sweep) | SIGN_DEPOSIT | Every input spends the deposit address (amounts proven by previous transactions); the one output is exactly this vault's script; one funding per vault, recorded before signatures leave |
+| **Refund a deposit** | SIGN_DEPOSIT | Every input spends the deposit address; outputs are shown addresses |
+| **Withdraw** | WITHDRAW, REVEAL_READ | One disclosure per vault: the device builds the withdrawal `T` itself, shows destinations, amounts and fee, records the disclosure in NVM, then releases 8 + 9 table preimages, 3 menu signatures and its co-signature |
+| **Solver data** | MENU_POINTS | Menu points (never scalars), after the user authorizes the export |
+| **Retire** | RETIRE | Ends a vault for good |
 
-**Vault recognition.** A QSB Config A vault script is always 9,923 bytes;
-everything but its 300 HORS commitments (20 bytes each) is the same in every
-vault. The device streams the script, hashes the 3,923 fixed bytes and compares
-that with a constant, so any other script is refused. The vault is shown by its
-script fingerprint, SHA-256 of the script: qsb-app's `scriptHash`, shown as
-"Script fingerprint" in its restore screen, and the script hash block
-explorers index. The check is in [`qsb-core/src/vault.rs`](qsb-core/src/vault.rs).
+The protocol is in [`docs/apdu.md`](docs/apdu.md).
 
-**Amounts and fees.** Every input's previous transaction is streamed and hashed
-to its txid, so input amounts are proven rather than claimed. The withdrawal's
-fee depends on the vault amount, which the helper's BIP-143 signature does not
-cover, so it is read from the deposit transaction, about 10 kB with the vault
-script, without buffering it.
-
-Nothing is shown that the device didn't derive itself from the bytes it signs.
-Signatures are RFC 6979 ECDSA, normalised to low S.
-
-### What the device does not protect
-
-- **Whose vault it is.** The template check proves a script is a QSB vault,
-  not that it is yours: a malicious host can pay into a vault whose HORS
-  secrets only it knows. Compare the fingerprint on the device with the one
-  in your own backup (qsb-app's restore screen) before approving a deposit.
-- **The vault's funds.** A QSB vault script has no wallet key in it: spending
-  it takes the HORS preimages and a GPU search. Approving a withdrawal's
-  signature guarantees only that the helper input this device signs goes to
-  the destination and fee shown; it can't stop someone holding the preimages
-  from spending the vault with another helper. For vaults whose secrets the
-  QSB client holds, that is the client; for vaults derived on this device, the
-  reveal is the point to check (see [HORS secrets](#hors-secrets) for its v1
-  limits). qsb-app's `docs/KEY-CUSTODY.md` describes the same trust model.
-- **Timing fields.** Version, locktime and sequences are signed but not
-  shown. A far-future locktime can delay a transaction; it can't redirect
-  funds.
-
-## HORS secrets
-
-A QSB vault's script commits to 2 × 150 one-time HORS secrets; a withdrawal
-reveals 15 of them. Today the QSB client draws them with `os.urandom` and
-keeps them in an encrypted backup file. With this app they come from the
-Ledger instead:
+### Derivation
 
 ```text
-K          = SLIP-0021 key for the label "QSB-HORS"   (no secp256k1 key involved)
-s[v][r][i] = HMAC-SHA256(K, "QSB-HORS-v1" ‖ 0x00 ‖ net ‖ v ‖ r ‖ i)[0..20)
-c[v][r][i] = RIPEMD160(SHA256(s))                    (the commitments qsb-app uses today)
+k = BIP 32 key at m/83696968'/39'/0'/24'/v'                     (BIP 85, BIP 39 app, 24 words)
+E = HMAC-SHA512("bip-entropy-from-k", k)[0:32]
+S = HMAC-SHA256(E, "pqb/vault-seed|hybrid|PQB|v1|real|main")
 ```
 
-- **A new vault is a new index `v`.** The host picks the next unused one and
-  reads its 300 commitments (13 GET_COMMITMENTS per round) and their root;
-  the vault script is built from them unchanged. GET_COMMITMENT_ROOT can show
-  the root's fingerprint ("9b25 7b6a cd00 017b") to compare with the QSB app.
-- **Nothing secret is stored or exported.** Secrets are re-derived per
-  command; the device keeps only the reveal record below. Commitments are
-  public. A vault can be rebuilt from the seed and `v`: no backup file holds
-  secrets any more.
-- **One reveal per vault.** REVEAL_PREPARE shows the vault, network, amount,
-  destination and "15 of 300"; on approval ("Hold to reveal", or "Reveal" on
-  Nano) the device records the reveal in NVM before REVEAL_READ hands out the
-  15 preimages. The same reveal again is allowed (a retry); a different one for
-  the same vault is refused. The record holds 64 vaults, keyed per wallet so a
-  BIP-39 passphrase's vaults don't collide with the main seed's; when full, the
-  device asks to forget the oldest. An approval lapses after 60 seconds. The
-  fingerprint check warns not to fund a vault whose secrets were revealed.
+Everything else (109 table entries, 44 menu signatures, co-signing key `d`,
+deposit key `dd`, commitment root `R`) follows the BIP's `PQB-v1` profile and
+matches pqb's construction version `v1` (commit `bb2ddca`): the pinning menu
+uses `r = 1`, the round menus `r = 0x81`. The 24 words of `E` are the BIP 85 child
+mnemonic a Coldcard or Jade shows for index `v`: an emergency path to pqb's own
+software exists without this app. The app serves mainnet only, the network the
+BIP defines a production custody profile for.
 
-What this does **not** do yet (the spec's v1 scope):
+The vault script is pqb's 4,696-byte bare legacy script, whose only
+seed-dependent bytes are the 154 commitments. The device embeds the script
+with those slots zeroed ([`pqb-core/src/template.bin`](pqb-core/src/template.bin),
+regenerated and checked against pqb by [`tools/pqb_template.py`](tools/pqb_template.py)),
+so it builds and recognises a vault's exact script itself: a sweep or withdrawal
+is accepted only for a script whose SHA-256 equals the one it derived.
 
-- **The amount and destination on the reveal screen are the host's word.**
-  The device can't yet check that the 15 indices belong to that withdrawal: a
-  lying host can get one reveal for a withdrawal of its choosing. The screen
-  says "host-reported, not verified". The spec's phase 2 closes this by
-  recomputing QSB's digest puzzle on the device.
-- **The record is per device and per install.** Another device with the same
-  seed, a reset, or an app update or reinstall (NVM in `.nvm_data` is erased)
-  starts empty. The QSB service's duplicate-root and submission checks are the
-  second line.
-- **The seed becomes the vault's single point of failure:** whoever holds it
-  can derive every vault's secrets and spend outside the service.
+### Disclosure lifecycle
 
-The protocol is in [`docs/apdu.md`](docs/apdu.md#hors-secrets);
-[`tests/application_client/hors.py`](tests/application_client/hors.py) is a
-reference implementation, checked against SLIP-0021's published vectors.
+The device keeps, per seed, an allocation high-water mark and a record per
+vault (`allocated`, `exposed`, `retired`, `unknown`) in NVM, each slot replaced
+atomically. Any unreadable slot makes it refuse every allocation and
+disclosure.
+
+- A disclosure is recorded before any secret or the co-signature leaves; a
+  crash after recording consumes the authorization.
+- After exposure, only the exact same request (indices, picks, `T`, funding)
+  may be retried, after a fresh approval. A changed output, fee, sequence,
+  locktime, index or pick is refused: there is no fee bump.
+- Confirmation, a chain scan or a user statement never resets a vault.
+- The first allocation on a seed asks whether it has ever held PQB vaults. "Used
+  before" marks the seed's history unknown: no allocation, and new deposits
+  need a fresh root (a new BIP 39 passphrase).
+- A vault without trustworthy history (an app update, reset or another device)
+  can still be withdrawn once on the **emergency path**, which the review
+  labels as outside custody conformance; the record stays `unknown`.
+
+### Conformance claim and trust boundary
+
+The app claims **custody conformance** within one install's history, and
+**derivation compatibility** with the BIP's vectors. Its continuity guarantee
+ends with an app update or reinstall (Ledger erases the app's NVM), a device
+reset, or the same seed on another device. The app does **not** verify the PQB
+puzzle solutions: every release is a **classically bound, quantum-unverified
+transaction binding**, and the review says so. The co-signature stops anyone
+without a quantum computer from using the secrets for anything but the
+displayed transaction; it does not stop a quantum adversary, who learns `d`
+once `Q` is published.
+
+The host is trusted for: confirming that the funding output is confirmed before
+asking for a withdrawal, checking the chain before allocating on an imported
+seed, keeping the menu points private to the solver, and the PQB puzzle search
+and witness assembly.
+
+## Use with pqb
+
+pqb grinds the puzzles and assembles the withdrawal; the device keeps the
+secrets. [`pqb_ledger`](clients/python/) bridges the two without changing pqb:
+
+```python
+from pqb_ledger import PqbDevice, LedgercommTransport, lock_from_device, solver_stages, assemble_spend
+
+dev = PqbDevice(LedgercommTransport())        # or SpeculosTransport(url)
+lock = lock_from_device(dev, v)               # pqb's Lock, checked against the device's root
+dev.authorize_menu_points(v)                  # approved on the device
+stages = solver_stages(lock)                  # pqb's solver stages, menu points from the device
+# ... grind with pqb, then with the plan's selection, menu picks and pin nonce:
+spend = assemble_spend(lock, funding, outputs, funding_tx, selection=..., menu_pick=..., pin_nonce=...)
+```
+
+For the same grind result it builds the same spending transaction, byte for
+byte, as pqb does from the seed. It checks every disclosed item against the
+script's commitments, and refuses a pqb that builds construction `v1`
+differently from the pinned commit.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
 | [`app/`](app/) | The device app (Ledger Rust SDK, NBGL on every device). Its `.cargo/config.toml` targets the devices, so it is its own build directory (`ledger_app.toml`). |
-| [`qsb-core/`](qsb-core/) | Everything that decides what is shown, signed and revealed, `no_std` and SDK-free so it runs in host tests: streaming transaction parser, vault matcher, BIP-143/BIP-322 digests, address encoding, sign-in parser, the signing state machine, HORS derivation and the reveal guard. |
-| [`docs/apdu.md`](docs/apdu.md) | The APDU protocol and status words. |
+| [`pqb-core/`](pqb-core/) | Everything that decides what is derived, shown, signed, recorded and released, `no_std` and SDK-free so it runs in host tests: the `PQB-v1` profile, 256-bit modular arithmetic, SHA-1, the script template, streaming transaction parsing, the record store, and the deposit and withdrawal state machines. |
+| [`docs/apdu.md`](docs/apdu.md) | The APDU protocol, conformance claim and status words. |
 | [`tests/standalone/`](tests/standalone/) | Ragger functional tests on Speculos, with screen snapshots. |
-| [`tests/fixtures/`](tests/fixtures/) | qsb-app's first mainnet deposit and withdrawal, and generated vault scripts. |
-| [`clients/js/`](clients/js/) | TypeScript client, `LedgerQsbSigner` (a Signer for the QSB SDK) and `QsbHors` (commitments, verified against the root, and reveals, verified against the commitments). |
-| [`tools/make_icons.py`](tools/make_icons.py) | Generates the icons and glyphs. |
+| [`tests/application_client/pqb.py`](tests/application_client/pqb.py) | Reference implementation of `PQB-v1` the tests compare the device with. |
+| [`tests/fixtures/`](tests/fixtures/) | pqb's script for the BIP's test seed. |
+| [`clients/js/`](clients/js/) | TypeScript client `@pqb/ledger`: every command, verification of a disclosure against the commitments, and the BIP's portable recovery manifest. |
+| [`clients/python/`](clients/python/) | `pqb_ledger`: drives the app from pqb, unmodified, so pqb's grinder and assembler work on device-held vaults. |
+| [`tools/`](tools/) | Icon generator, and the template generator (needs a pqb checkout). |
 
 ## Build
 
-With Docker and Ledger's builder image (multi-arch, so it runs natively on Apple Silicon):
+With Docker and Ledger's builder image:
 
 ```bash
 docker run --rm -v "$(pwd -P):/app" -w /app/app ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest cargo ledger build nanosplus
 ```
 
 Devices: `nanosplus`, `nanox`, `stax`, `flex`, `apex_p`. The binary is in
-`app/target/<device>/release/app-qsb`.
+`app/target/<device>/release/app-pqb`.
 
 ## Test
 
-Core logic, on the host. These include qsb-app's first mainnet deposit and
-withdrawal: the app's digests verify the signatures already on chain.
+Core logic on the host, against the BIP's vectors, pqb's script and solver
+export, and rust-bitcoin's sighashes:
 
 ```bash
-cd qsb-core && cargo test
+cd pqb-core && cargo test
 ```
 
-Functional tests on Speculos, after building every device (all devices, or
-one with `--device nanosp`). Ragger finds the project root by its `.git`
-directory, so run them from a git checkout:
+Functional tests on Speculos, after building every device (or one with
+`--device nanosp`), from a git checkout:
 
 ```bash
 docker run --rm -v "$(pwd -P):/app" -w /app ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest bash -c "pip install -r tests/standalone/requirements.txt && pytest tests/standalone --tb=short --device all"
@@ -154,73 +152,64 @@ docker run --rm -v "$(pwd -P):/app" -w /app ghcr.io/ledgerhq/ledger-app-builder/
 
 Add `--golden_run` to regenerate the screen snapshots after a UI change.
 
-The TypeScript client's host tests, then its end-to-end tests against Speculos
-running the Nano S+ build. On macOS port 5000 belongs to AirPlay, hence 5055:
+The TypeScript client's host tests; with `SPECULOS_API` set, also its tests
+against Speculos running the Nano S+ build (port 5055: on macOS 5000 is AirPlay's):
 
 ```bash
 cd clients/js && npm ci && npm test
 ```
 
 ```bash
-docker run -d --rm --name qsb-speculos -p 5055:5000 -v "$(pwd -P):/app" ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest speculos --model nanosp --display headless --api-port 5000 /app/app/target/nanosplus/release/app-qsb
+docker run -d --rm --name pqb-speculos -p 5055:5000 -v "$(pwd -P):/app" ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest speculos --model nanosp --display headless --api-port 5000 /app/app/target/nanosplus/release/app-pqb
 ```
 
 ```bash
 cd clients/js && SPECULOS_API=http://127.0.0.1:5055 npm test
 ```
 
-Ledger's guidelines enforcer (`/opt/enforcer.sh` in the image) reads the repo
-name from the `origin` remote, so add one before running it. Its
-`app_load_params` check fails until the app is registered in
-`LedgerHQ/ledger-app-database`.
+The pqb adapter (installs pqb from GitHub at the pinned commit); with
+`PQB_SPECULOS` set, it also checks the app's vaults against pqb's own BIP 85
+derivation:
 
-On GitHub, [`ci.yml`](.github/workflows/ci.yml) runs all of this in the same
-image on every push. Ledger's reusable workflows (the other three files) run
-only by hand until the organization's Actions policy allows
-`LedgerHQ/ledger-app-workflows`.
-
-## Use with the QSB SDK
-
-`LedgerQsbSigner` has the shape of the SDK's `Signer` (`sdk/signer.ts`):
-
-```ts
-import TransportNodeHid from "@ledgerhq/hw-transport-node-hid";
-import { LedgerQsbSigner } from "@qsb/ledger";
-
-const transport = await TransportNodeHid.create();
-const signer = await LedgerQsbSigner.connect(transport, "m/84'/0'/0'/0/0", { verifyAddress: true });
-const client = new QsbClient({ signer, /* … */ });
+```bash
+cd clients/python && pip install -e '.[dev]' && cd tests && python -m unittest -v test_device
 ```
 
-The SDK calls `signMessage` for sign-in and `signPsbt(address, psbt, [0])` for
-the withdrawal helper; deposits are signed with `signPsbt(address, psbt, every
-input)`. Signatures come back as PSBT partial signatures. The `qsb` CLI has no
-Ledger signer option yet; its `external` signer mode works with this client.
+```bash
+cd clients/python/tests && PQB_SPECULOS=http://127.0.0.1:5055 python -m unittest -v test_device
+```
+
+To regenerate the script template from a pqb checkout that builds construction
+`v1` (commit `bb2ddca` or later; needs `coincurve`). It fails if the layout no
+longer matches `pqb-core/src/template.rs`:
+
+```bash
+python3 tools/pqb_template.py /path/to/pqb
+```
+
+On GitHub, [`ci.yml`](.github/workflows/ci.yml) runs the device builds and
+Speculos tests in the builder image on every push, and
+[`host_tests.yml`](.github/workflows/host_tests.yml) the host tests.
 
 ## Open questions before a Ledger submission
 
-- **Which route Ledger accepts.** Ledger's docs send Bitcoin layer-2 apps to the
-  C [`app-btcext-boilerplate`](https://github.com/LedgerHQ/app-btcext-boilerplate)
-  on top of the Bitcoin app, while requiring Rust for new apps. This app
-  declares `84'/0'` and `49'/0'`, Bitcoin's own key space. Ask Ledger through
-  the intro form before investing in a submission.
+- **The BIP 85 path.** The app declares `83696968'/39'/0'/24'`, the BIP 85
+  BIP 39 application's key space. Ledger has to accept an app deriving there;
+  ask through the intro form before investing in a submission.
+- **NVM continuity.** An app update erases the records, which ends custody
+  conformance for every vault of the seed and leaves only the emergency path.
+  A continuity mechanism that survives updates (the BIP leaves it unspecified)
+  is the main gap.
+- **Verified transaction binding.** Checking the three puzzle solutions on the
+  device would remove the "quantum-unverified" caveat; the BIP leaves that
+  verifier unspecified.
+- **pqb's command line.** [`clients/python/`](clients/python/) lets pqb's
+  library use a device-held vault without changing pqb, but it relies on pqb
+  internals and pins pqb's commit; `pqb` commands themselves don't drive the
+  device.
 - Registration in `LedgerHQ/ledger-app-database`, a security audit, the
-  developer name (`authors` in `app/Cargo.toml` is a placeholder), the icons,
-  and the other deliverables in Ledger's checklist.
-- The vault template is tied to qsb-app's Config A generator (commit
-  `2c917205…`). A new QSB script version needs a new skeleton hash.
-- **SLIP-21 on hardware.** Speculos and the Ledger Bitcoin app agree that the
-  OS returns SLIP-0021's key in the first 32 bytes of its output, and Speculos
-  matches the published vectors; confirm once on a real device with a test
-  seed before any vault holds funds.
-- **Ledger's tooling and the SLIP-21 label.** The guidelines enforcer doesn't
-  read `path_slip21` from a Rust app's metadata, so its `app_load_params` check
-  can't pass for the `QSB-HORS` label without a change to
-  `LedgerHQ/ledger-app-workflows`.
-- **qsb-app integration** (the spec's "Host integration"): a `ledger-slip21-v1`
-  vault source, a bridge entry point that builds the script from commitments,
-  `bridge.assemble` taking the 15 preimages, and the service-side duplicate-root
-  and reveal-set checks.
+  developer name (`authors` in `app/Cargo.toml`), the icons, and the rest of
+  Ledger's checklist.
 
 ## License
 

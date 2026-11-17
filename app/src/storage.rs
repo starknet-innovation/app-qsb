@@ -1,31 +1,44 @@
-//! The reveal guard's table (`qsb_core::guard`) in the app's NVM.
+//! The PQB records (`pqb_core::record`) in the app's NVM.
 //!
-//! `AtomicStorage` keeps two copies and switches between them only once the new
-//! one is fully written, so a power cut leaves either the old table or the new
-//! one, never a mix. `update` returns once the write is done. The table lives in
-//! `.nvm_data`, which an app update or reinstall erases.
+//! Each of the 33 slots is an `AtomicStorage`: two copies, switched only once
+//! the new one is fully written, so a power cut leaves either the old slot or
+//! the new one, never a mix. `update` returns once the write is done. The slots
+//! live in `.nvm_data`, which an app update or reinstall erases: that ends the
+//! continuity the records vouch for (docs/apdu.md, "Conformance").
 
 use ledger_device_sdk::nvm::{AtomicStorage, SingleStorage};
 use ledger_device_sdk::NVMData;
-use qsb_core::guard::TABLE_LEN;
+use pqb_core::record::{Slot, Store, SLOTS, SLOT_LEN};
+
+const EMPTY: Slot = [0u8; SLOT_LEN];
 
 #[link_section = ".nvm_data"]
-static mut GUARD: NVMData<AtomicStorage<[u8; TABLE_LEN]>> =
-    NVMData::new(AtomicStorage::new(&[0u8; TABLE_LEN]));
+static mut STORE: [NVMData<AtomicStorage<Slot>>; SLOTS] =
+    [const { NVMData::new(AtomicStorage::new(&EMPTY)) }; SLOTS];
 
-fn storage() -> &'static mut AtomicStorage<[u8; TABLE_LEN]> {
-    let data = &raw mut GUARD;
-    // SAFETY: the app is single-threaded and only this module touches GUARD; no
-    // reference from `table` is used across a `write`.
-    unsafe { (*data).get_mut() }
+fn slot(i: usize) -> &'static mut AtomicStorage<Slot> {
+    let data = &raw mut STORE;
+    // SAFETY: the app is single-threaded and only this module touches STORE; no
+    // reference from `read` is used across a `write`.
+    unsafe { (*data)[i].get_mut() }
 }
 
-/// The current table. An all-zero table is empty.
-pub fn table() -> &'static [u8; TABLE_LEN] {
-    storage().get_or_init(&[0u8; TABLE_LEN])
+/// Make every slot hold a value, so reads never meet a never-written storage
+/// (Speculos loads `.nvm_data` zeroed). Writes only the first time.
+pub fn init() {
+    for i in 0..SLOTS {
+        slot(i).get_or_init(&EMPTY);
+    }
 }
 
-/// Replace the table, durably, before returning.
-pub fn write(table: &[u8; TABLE_LEN]) {
-    storage().update(table);
+pub struct Nvm;
+
+impl Store for Nvm {
+    fn read(&self, i: usize) -> &Slot {
+        slot(i).get_or_init(&EMPTY)
+    }
+
+    fn write(&mut self, i: usize, data: &Slot) {
+        slot(i).update(data);
+    }
 }

@@ -93,13 +93,13 @@ def save(img, path, mode):
 
 
 def main():
-    save(bitmap(NANO_Q), APP / "icons/qsb_14x14.gif", "1")
+    save(bitmap(NANO_Q), APP / "icons/pqb_14x14.gif", "1")
     save(bitmap(NANO_MASK), APP / "icons/mask_14x14.gif", "1")
-    save(q_mark(32, 16), APP / "icons/qsb_32x32.gif", "L")
-    save(q_mark(40, 16), APP / "icons/qsb_40x40.gif", "L")
-    save(q_mark(32, 2), APP / "icons/qsb_32x32.png", "1")
-    save(q_mark(64, 16), APP / "glyphs/qsb_64x64.gif", "L")
-    save(q_mark(48, 2), APP / "glyphs/qsb_48x48.png", "1")
+    save(q_mark(32, 16), APP / "icons/pqb_32x32.gif", "L")
+    save(q_mark(40, 16), APP / "icons/pqb_40x40.gif", "L")
+    save(q_mark(32, 2), APP / "icons/pqb_32x32.png", "1")
+    save(q_mark(64, 16), APP / "glyphs/pqb_64x64.gif", "L")
+    save(q_mark(48, 2), APP / "glyphs/pqb_48x48.png", "1")
 
 
 if __name__ == "__main__":
