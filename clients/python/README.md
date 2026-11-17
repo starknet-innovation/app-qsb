@@ -13,6 +13,11 @@ Ledger app holds, without changing pqb.
 over `SpeculosTransport(url)` or `LedgercommTransport()` (`pip install
 '.[usb]'`).
 
+**Access to pqb.** `fireblocks-labs/pqb` is a private repository: installing
+this package needs GitHub access to it (your own credentials locally; in CI, a
+read-only token in the `PQB_REPO_TOKEN` secret, without which the job is
+skipped).
+
 **Pinned pqb.** The adapter uses pqb internals (`Lock._res`, `Stage` fields, the
 vendored assembler's `cosig_sign`). `pyproject.toml` installs pqb at commit
 `bb2ddca`, and `check_pqb()` refuses any pqb whose construction `v1` script

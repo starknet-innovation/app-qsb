@@ -1,5 +1,13 @@
 name: Ensure compliance with Ledger guidelines
 
+# Exactly what the reusable workflow declares (a caller granting less makes the
+# run fail): read the code, run its sub-workflows, pull the app-builder image.
+permissions:
+  contents: read
+  actions: write
+  pull-requests: write
+  packages: read
+
 # Mandatory for every app listed in Ledger's app store.
 
 # Ledger's reusable workflows (LedgerHQ/ledger-app-workflows) are what Ledger
@@ -14,4 +22,4 @@ on:
 jobs:
   guidelines_enforcer:
     name: Call Ledger guidelines_enforcer
-    uses: LedgerHQ/ledger-app-workflows/.github/workflows/reusable_guidelines_enforcer.yml@v1
+    uses: LedgerHQ/ledger-app-workflows/.github/workflows/reusable_guidelines_enforcer.yml@0e5967c623a6cd5931c931f5135edb134eba9257 # v1
