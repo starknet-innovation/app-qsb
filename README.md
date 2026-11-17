@@ -4,11 +4,16 @@ A Ledger device app, in Rust, that holds the signing secrets of
 [PQB](https://github.com/fireblocks-labs/pqb) (Post-Quantum Bitcoin) vaults, as
 specified by the BIP draft "PQB Wallet Secret Management" (profile `PQB-v1`).
 
-A PQB vault is spent with a hybrid signature: one-time hash preimages that a
-quantum computer does not break, and an ordinary ECDSA co-signature. All of it
-derives from one 32-byte vault seed. This app derives every vault seed from the
-device's own seed, so the Ledger backup is the vault backup, and it keeps the
-history that makes the one-time secrets safe to disclose exactly once.
+A PQB vault is spent by disclosing one-time hash preimages, which a quantum
+computer does not break, once. All of its secrets derive from one 32-byte vault
+seed. This app derives every vault seed from the device's own seed, so the
+Ledger backup is the vault backup, and it keeps the history that makes the
+one-time secrets safe to disclose exactly once.
+
+pqb's vault script (construction `v1`) also checks an ECDSA signature by a key
+derived from the same seed, so the device produces that signature with each
+disclosure. It is a condition of the script, not a separate feature: no
+withdrawal is valid without it.
 
 **Not audited and not submitted to Ledger.** PQB is research code that runs on
 Bitcoin mainnet; treat this app the same way.
