@@ -1,5 +1,5 @@
-//! The `PQB-v1` derivation profile (BIP "PQB Wallet Secret Management"), for
-//! pqb's construction version `v1` (pqb commit `bb2ddca`).
+//! The `PQB-v1` derivation profile (BIP "PQB Vault Secret Management"), for
+//! pqb's construction version `v1` (pqb commit `82c7cba`).
 //!
 //! ```text
 //! k    = BIP 32 private key at m/83696968'/39'/0'/24'/v'          (from the OS)
@@ -17,8 +17,8 @@
 //! R    = SHA256("PQB-v1/root" || c[0..109] || m_pin || m_round0 || m_round1 || q)
 //! ```
 //!
-//! This build serves `main` only: the BIP defines a production custody profile
-//! for mainnet alone.
+//! This build serves `main` only. The BIP also binds seeds to `testnet4` and
+//! `regtest`; the app leaves those to software wallets.
 
 use crate::der::{self, DerSignature};
 use crate::hash::{Hashes, Sha256};
@@ -282,13 +282,33 @@ impl Vault {
 
     /// The commitment root R.
     pub fn root<Hs: Hashes>(&self) -> [u8; 32] {
+        self.root_and_screen::<Hs>().0
+    }
+
+    /// The commitment root R, or `None` when the vault fails the BIP's DER
+    /// screen: one of its commitments, each a 20-byte push in the script,
+    /// parses as a strict DER signature (about 2^-33 per vault). Such a vault
+    /// must never be funded; allocation skips its index. The template's other
+    /// 20-byte pushes and the item under the table are constants, checked once
+    /// by the host tests.
+    pub fn screened_root<Hs: Hashes>(&self) -> Option<[u8; 32]> {
+        match self.root_and_screen::<Hs>() {
+            (root, true) => Some(root),
+            (_, false) => None,
+        }
+    }
+
+    fn root_and_screen<Hs: Hashes>(&self) -> ([u8; 32], bool) {
         let mut h = Hs::Sha256::new();
         h.update(PROFILE);
         h.update(b"/root");
+        let mut clean = true;
         for i in 0..COMMITMENTS {
-            h.update(&self.commitment::<Hs>(i));
+            let c = self.commitment::<Hs>(i);
+            clean &= !der::is_strict(&c);
+            h.update(&c);
         }
-        h.finalize()
+        (h.finalize(), clean)
     }
 
     /// Feed the locking script, in order, to `sink`.

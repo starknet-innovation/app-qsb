@@ -8,27 +8,23 @@ import {
   DisclosureError,
   PqbApp,
   PqbStatusError,
-  buildManifest,
   commitmentRoot,
   commitmentsFromScript,
   disclosureDigest,
   fingerprint,
   legacySighashAll,
-  parseManifestJson,
   parseRecord,
   scriptHash,
   serializeTx,
   parseTx as parseTxOf,
   stripWitness,
   txidOf,
-  validateManifest,
   vaultScript,
   verifyDisclosure,
   withdrawalTx,
   type ApduTransport,
   type DisclosureRequest,
   type DisclosureResponse,
-  type Manifest,
 } from "../src/index.js";
 import * as ref from "./reference.js";
 
@@ -382,7 +378,7 @@ test("verifyDisclosure accepts honest data and rejects each tampered item", () =
   assert.throws(() => verifyDisclosure(CS, REQUEST, other, response), /verify/);
 });
 
-// ---- records and the manifest -----------------------------------------------
+// ---- records -----------------------------------------------------------------
 
 const WALLET = new Uint8Array(16).fill(0xaa);
 
@@ -417,29 +413,20 @@ function recordBytes(o: {
   return new Uint8Array(b);
 }
 
-function manifestInputs() {
+function recordInputs() {
   const prev = withdrawRequest().prevTx;
   const txid = sha256(sha256(prev));
   const { t } = honest();
   const records = [
-    // Out of order on purpose: the manifest sorts by v.
     parseRecord(recordBytes({ v: 4, state: 2, flags: 3, funding: { txid, vout: 0, value: 100_000n }, disclosure: { request: REQUEST, t } })),
     parseRecord(recordBytes({ v: 0, state: 1, flags: 0 })),
     parseRecord(recordBytes({ v: 2, state: 1, flags: 1, funding: { txid, vout: 0, value: 100_000n } })),
   ];
-  const script = vaultScript(CS);
-  return {
-    state: { walletId: WALLET, namespace: 1, nextV: 5, records: 3, capacity: 32 },
-    records,
-    scripts: new Map([0, 2, 4].map((v) => [v, script] as [number, Uint8Array])),
-    transactions: new Map([[4, t]]),
-    t,
-    txid,
-  };
+  return { records, t };
 }
 
 test("parseRecord reads the device layout", () => {
-  const { records, t } = manifestInputs();
+  const { records, t } = recordInputs();
   const r = records[0];
   assert.equal(r.v, 4);
   assert.equal(r.state, "exposed");
@@ -449,76 +436,6 @@ test("parseRecord reads the device layout", () => {
   assert.deepEqual(r.disclosure!.binding, sha256(t));
   assert.equal(records[1].funding, null);
   assert.equal(records[1].disclosure, null);
-});
-
-test("buildManifest produces a valid BIP manifest", () => {
-  const inputs = manifestInputs();
-  const m = buildManifest(inputs);
-  assert.equal(m.format, "pqb-secret-manifest");
-  assert.equal(m.next_v, 5);
-  assert.deepEqual(m.vaults.map((x) => [x.v, x.state]), [[0, "allocated"], [2, "allocated"], [4, "exposed"]]);
-  const exposed = m.vaults[2];
-  assert.equal(exposed.root, ROOT);
-  assert.equal(exposed.script_hash, SCRIPT_HASH);
-  assert.deepEqual(exposed.funding, { txid: txidOf(withdrawRequest().prevTx), vout: 0, value_sat: 100_000 });
-  assert.equal(exposed.disclosure!.transaction, hex(inputs.t));
-  assert.deepEqual(exposed.disclosure!.menu_picks, [11, 0, 15]);
-  // Round-trips through strict JSON.
-  const parsed = parseManifestJson(JSON.stringify(m, null, 2));
-  validateManifest(parsed);
-  assert.deepEqual(parsed, m);
-
-  // T is required for an exposed vault and must hash to the recorded B.
-  assert.throws(() => buildManifest({ ...inputs, transactions: new Map() }), /T is required/);
-  const wrongT = Uint8Array.from(inputs.t);
-  wrongT[wrongT.length - 1] ^= 1;
-  assert.throws(() => buildManifest({ ...inputs, transactions: new Map([[4, wrongT]]) }), /recorded B/);
-  // The script must match the record.
-  const badScript = vaultScript(ref.commitments(new Uint8Array(32)));
-  assert.throws(() => buildManifest({ ...inputs, scripts: new Map([...inputs.scripts, [2, badScript]]) }), /hash/);
-  // Records of another seed are refused.
-  assert.throws(() => buildManifest({ ...inputs, state: { ...inputs.state, walletId: new Uint8Array(16) } }), /another seed/);
-});
-
-test("validateManifest rejects malformed or inconsistent manifests", () => {
-  const good = buildManifest(manifestInputs());
-  const clone = (): Manifest & Record<string, unknown> => JSON.parse(JSON.stringify(good));
-  const mutations: [string, (m: any) => void][] = [
-    ["unknown member", (m) => (m.extra = 1)],
-    ["missing member", (m) => delete m.network],
-    ["wrong format", (m) => (m.format = "pqb-manifest")],
-    ["wrong version", (m) => (m.version = 2)],
-    ["other network", (m) => (m.network = "testnet4")],
-    ["unsorted vaults", (m) => m.vaults.reverse()],
-    ["duplicate v", (m) => (m.vaults[1].v = 0)],
-    ["v beyond next_v", (m) => (m.next_v = 4)],
-    ["uppercase hex", (m) => (m.vaults[0].root = m.vaults[0].root.toUpperCase())],
-    ["script hash mismatch", (m) => (m.vaults[0].script_hash = "00".repeat(32))],
-    ["root not in script", (m) => (m.vaults[0].root = "00".repeat(32))],
-    ["script without hash", (m) => (m.vaults[0].script_hash = null)],
-    ["funding without script", (m) => ((m.vaults[1].script_pubkey = null), (m.vaults[1].script_hash = null))],
-    ["exposed without disclosure", (m) => (m.vaults[2].disclosure = null)],
-    ["allocated with disclosure", (m) => (m.vaults[2].state = "allocated")],
-    ["bad state", (m) => (m.vaults[0].state = "fresh")],
-    ["digest mismatch", (m) => (m.vaults[2].disclosure.digest = "00".repeat(32))],
-    ["T not spending the funding", (m) => (m.vaults[2].funding.vout = 1)],
-    ["txid not in display order", (m) => (m.vaults[2].funding.txid = hex(unhex(m.vaults[2].funding.txid).reverse()))],
-    ["index in both rounds", (m) => (m.vaults[2].disclosure.round1[0] = 0)],
-    ["pick out of range", (m) => (m.vaults[2].disclosure.menu_picks[0] = 12)],
-    ["value out of range", (m) => (m.vaults[2].funding.value_sat = 2_100_000_000_000_001)],
-    ["raw32 with next_v 5", (m) => (m.seed_source = "raw32")],
-  ];
-  for (const [what, mutate] of mutations) {
-    const m = clone();
-    mutate(m);
-    assert.throws(() => validateManifest(m), /Invalid manifest/, what);
-  }
-  // Strict JSON: duplicate members, fractions, trailing data, invalid UTF-8.
-  const text = JSON.stringify(good);
-  assert.throws(() => parseManifestJson(text.replace('"version":1', '"version":1,"version":1')), /duplicate/);
-  assert.throws(() => parseManifestJson(text.replace('"version":1', '"version":1.0')), /non-integral/);
-  assert.throws(() => parseManifestJson(text + "{}"), /trailing/);
-  assert.throws(() => parseManifestJson(Uint8Array.of(0x22, 0xff, 0x22)));
 });
 
 // ---- SIGN_DEPOSIT -----------------------------------------------------------

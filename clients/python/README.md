@@ -20,7 +20,7 @@ skipped).
 
 **Pinned pqb.** The adapter uses pqb internals (`Lock._res`, `Stage` fields, the
 vendored assembler's `cosig_sign`). `pyproject.toml` installs pqb at commit
-`bb2ddca`, and `check_pqb()` refuses any pqb whose construction `v1` script
+`82c7cba`, and `check_pqb()` refuses any pqb whose construction `v1` script
 differs from that commit's.
 
 **Mainnet only.** The app binds every vault seed to mainnet; a `DeviceLock`

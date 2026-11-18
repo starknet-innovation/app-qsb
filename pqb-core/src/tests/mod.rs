@@ -2,6 +2,7 @@
 //! tests/application_client/pqb.py, and from the pqb implementation's scripts
 //! (tests/fixtures).
 
+mod bip_vectors;
 mod deposit;
 mod pqb;
 mod primitives;

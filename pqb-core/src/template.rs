@@ -2,7 +2,7 @@
 //!
 //! A PQB vault's scriptPubKey is a bare legacy script of 4,696 bytes, built by
 //! the pqb implementation (construction version `v1`, configuration `PQB`, real
-//! puzzles; pqb commit `bb2ddca`). Its only seed-dependent content is the 154
+//! puzzles; pqb commit `82c7cba`). Its only seed-dependent content is the 154
 //! commitments of the root `R`, each a 20-byte push (`0x14 || commitment`) at a
 //! fixed offset. `template.bin` is that script with every commitment zeroed;
 //! `tools/pqb_template.py` regenerates it from pqb, rediscovers the layout below

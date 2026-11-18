@@ -112,7 +112,7 @@ export type WithdrawRequest = DisclosureRequest & {
 };
 
 export type WithdrawResult = DisclosureResponse & {
-  /** T: the withdrawal with an empty scriptSig; keep it, the manifest needs it. */
+  /** T: the withdrawal with an empty scriptSig. Keep it: a retry must send these exact bytes. */
   transaction: Uint8Array;
   /** B = SHA256(T). */
   binding: Uint8Array;
@@ -302,7 +302,7 @@ export class PqbApp {
    * Throws DisclosureError if the device's response doesn't verify.
    *
    * The device records the disclosure before releasing anything: keep the
-   * returned `transaction` (T) for retries and the recovery manifest.
+   * returned `transaction` (T): a retry must request these exact bytes again.
    */
   async withdraw(v: number, request: WithdrawRequest, commitments: Uint8Array[]): Promise<WithdrawResult> {
     checkVault(v);

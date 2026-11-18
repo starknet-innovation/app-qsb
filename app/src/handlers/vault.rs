@@ -193,16 +193,19 @@ pub fn allocate(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
     if !record::has_room(&store)? {
         return Err(AppSW::StoreFull);
     }
-    let v = ns.next_v;
-    if v > pqb::MAX_VAULT_INDEX {
-        return Err(AppSW::StoreFull);
-    }
-    let (root, script_hash) = {
+    // The BIP's DER screen: an index whose vault fails it is never allocated.
+    // Skipping is deterministic, so a crash before the high-water mark moves
+    // skips the same index again.
+    let mut v = ns.next_v;
+    let (root, script_hash) = loop {
+        if v > pqb::MAX_VAULT_INDEX {
+            return Err(AppSW::StoreFull);
+        }
         let vault = crypto::vault(v)?;
-        (
-            vault.root::<DeviceHashes>(),
-            vault.script_hash::<DeviceHashes>(),
-        )
+        if let Some(root) = vault.screened_root::<DeviceHashes>() {
+            break (root, vault.script_hash::<DeviceHashes>());
+        }
+        v += 1;
     };
     if !ui::allocate(comm, v, &root) {
         return Err(AppSW::Deny);

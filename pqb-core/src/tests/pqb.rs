@@ -3,6 +3,7 @@ use std::vec::Vec;
 use hmac::Mac;
 
 use super::support::{h, h32, pqb_script, test_seed, vault, SoftCurve};
+use crate::der;
 use crate::hash::soft::Soft;
 use crate::hash::{sha256, Hashes};
 use crate::pqb::{self, child_entropy, fingerprint, key_from_bytes, vault_seed, Curve};
@@ -351,4 +352,108 @@ fn wallet_id_and_device_seed() {
     assert_eq!(pqb::parse_index(&[0x80, 0, 0, 0]), None);
     assert_eq!(pqb::parse_index(&[0, 0, 0]), None);
     let _ = Soft::ripemd160(b"");
+}
+
+/// Script pushes as (offset, data); `None` for a non-push opcode.
+fn pushes(script: &[u8]) -> Vec<(usize, Option<Vec<u8>>)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < script.len() {
+        let op = script[i];
+        let (start, len) = match op {
+            0x01..=0x4b => (i + 1, op as usize),
+            0x4c => (i + 2, script[i + 1] as usize),
+            0x4d => (
+                i + 3,
+                u16::from_le_bytes([script[i + 1], script[i + 2]]) as usize,
+            ),
+            0x4e => panic!("no OP_PUSHDATA4 in the template"),
+            _ => {
+                let small = match op {
+                    0x00 => Some(Vec::new()),
+                    0x4f => Some(std::vec![0x81]),
+                    0x51..=0x60 => Some(std::vec![op - 0x50]),
+                    _ => None,
+                };
+                out.push((i, small));
+                i += 1;
+                continue;
+            }
+        };
+        out.push((i, Some(script[start..start + len].to_vec())));
+        i = start + len;
+    }
+    out
+}
+
+#[test]
+fn der_is_strict() {
+    // A menu signature with its hashtype is strict DER; so is a crafted 20-byte one.
+    let v = vault(test_seed());
+    let mut b = [0u8; 80];
+    let n = v.menu_signature::<Soft>(1, 0).write(&mut b);
+    assert!(der::is_strict(&b[..n]));
+    let crafted = h("3011020601020304050602070102030405060701");
+    assert_eq!(crafted.len(), 20);
+    assert!(der::is_strict(&crafted));
+    // Each of Core's rules, broken one at a time.
+    for (at, byte) in [
+        (0, 0x31),  // not a SEQUENCE
+        (1, 0x12),  // wrong total length
+        (2, 0x03),  // r not an INTEGER
+        (3, 0x00),  // empty r
+        (4, 0x81),  // negative r
+        (10, 0x03), // s not an INTEGER
+        (12, 0x81), // negative s
+    ] {
+        let mut bad = crafted.clone();
+        bad[at] = byte;
+        assert!(!der::is_strict(&bad), "byte {at} = {byte:#04x}");
+    }
+    let mut padded_r = crafted.clone();
+    padded_r[4] = 0x00; // r = 00 02 ..: an unnecessary leading zero
+    assert!(!der::is_strict(&padded_r));
+    let mut padded_s = crafted.clone();
+    padded_s[12] = 0x00;
+    assert!(!der::is_strict(&padded_s));
+    assert!(!der::is_strict(&crafted[..19]));
+    assert!(!der::is_strict(&[0u8; 20]));
+}
+
+/// The device screens only the 154 commitment slots. That covers the BIP's DER
+/// screen because the slots are the script's only 20-byte pushes and the item
+/// under the table is a constant that does not parse as DER.
+#[test]
+fn der_screen_covers_the_script() {
+    let script = pqb_script();
+    let toks = pushes(&script);
+    let mut push20: Vec<usize> = toks
+        .iter()
+        .filter(|(_, d)| d.as_ref().is_some_and(|d| d.len() == 20))
+        .map(|&(off, _)| off + 1)
+        .collect();
+    let mut slots: Vec<usize> = (0..template::SLOTS).map(|k| template::slot(k).0).collect();
+    push20.sort_unstable();
+    slots.sort_unstable();
+    assert_eq!(push20, slots);
+    for (off, d) in &toks {
+        if let Some(d) = d {
+            if d.len() == 20 {
+                assert!(!der::is_strict(d), "20-byte push at {off}");
+            }
+        }
+    }
+    // The first table commitment follows its dummy signature; under that is the
+    // item directly under the table.
+    let first = toks.iter().position(|&(off, _)| off == 306).unwrap();
+    let dummy = toks[first - 1].1.as_ref().unwrap();
+    assert!(
+        der::is_strict(dummy),
+        "the item before c[0] is its dummy signature"
+    );
+    let under = toks[first - 2].1.as_ref().expect("a script constant");
+    assert!(!der::is_strict(under));
+    // The test vaults pass, and screened_root agrees with root.
+    let v = vault(test_seed());
+    assert_eq!(v.screened_root::<Soft>(), Some(v.root::<Soft>()));
 }

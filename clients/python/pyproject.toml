@@ -11,7 +11,7 @@ license = { text = "Apache-2.0" }
 # pqb, pinned to the commit this adapter was checked against (pqb_ledger.PQB_COMMIT). pqb pins
 # coincurve itself.
 dependencies = [
-    "pqbitcoin @ git+https://github.com/fireblocks-labs/pqb.git@bb2ddcad5b43ca5c603b3c4054c334cde7e19c47#subdirectory=pqb",
+    "pqbitcoin @ git+https://github.com/fireblocks-labs/pqb.git@82c7cba684899e5a069f5f1baf4931c59111d345#subdirectory=pqb",
 ]
 
 [project.optional-dependencies]

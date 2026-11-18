@@ -2,7 +2,7 @@
 
 A Ledger device app, in Rust, that holds the signing secrets of
 [PQB](https://github.com/fireblocks-labs/pqb) (Post-Quantum Bitcoin) vaults, as
-specified by the BIP draft "PQB Wallet Secret Management" (profile `PQB-v1`).
+specified by the BIP draft "PQB Vault Secret Management" (profile `PQB-v1`).
 
 A PQB vault is spent by disclosing one-time hash preimages, which a quantum
 computer does not break, once. All of its secrets derive from one 32-byte vault
@@ -43,11 +43,16 @@ S = HMAC-SHA256(E, "pqb/vault-seed|hybrid|PQB|v1|real|main")
 
 Everything else (109 table entries, 44 menu signatures, co-signing key `d`,
 deposit key `dd`, commitment root `R`) follows the BIP's `PQB-v1` profile and
-matches pqb's construction version `v1` (commit `bb2ddca`): the pinning menu
+matches pqb's construction version `v1` (commit `82c7cba`): the pinning menu
 uses `r = 1`, the round menus `r = 0x81`. The 24 words of `E` are the BIP 85 child
 mnemonic a Coldcard or Jade shows for index `v`: an emergency path to pqb's own
-software exists without this app. The app serves mainnet only, the network the
-BIP defines a production custody profile for.
+software exists without this app. The BIP binds seeds to `main`, `testnet4` and
+`regtest`; the app serves `main` only.
+
+Allocation applies the BIP's DER screen: an index whose vault has a commitment
+that parses as a strict DER signature (about 2^-33 per vault) is skipped and
+never offered for funding. The commitments are the script's only 20-byte
+pushes, and the item under the table is a constant; the host tests check both.
 
 The vault script is pqb's 4,696-byte bare legacy script, whose only
 seed-dependent bytes are the 154 commitments. The device embeds the script
@@ -74,24 +79,39 @@ disclosure.
   need a fresh root (a new BIP 39 passphrase).
 - A vault without trustworthy history (an app update, reset or another device)
   can still be withdrawn once on the **emergency path**, which the review
-  labels as outside custody conformance; the record stays `unknown`.
+  labels as outside custody conformance; the record stays `unknown`. The host
+  should run the BIP's restoration flow (chain check, typed attestation)
+  before asking for it.
 
 ### Conformance claim and trust boundary
 
-The app claims **custody conformance** within one install's history, and
-**derivation compatibility** with the BIP's vectors. Its continuity guarantee
-ends with an app update or reinstall (Ledger erases the app's NVM), a device
-reset, or the same seed on another device. The app does **not** verify the PQB
+The app claims **derivation compatibility** (BIP 0.2.0): it passes every `main`
+vector of the BIP. It does **not** claim custody conformance on its own. The
+BIP makes that a claim about the whole wallet, and most of its custody rules
+need a host that keeps the vault directory and can reach the chain:
+
+| BIP custody rule | Device | Host must |
+| --- | --- | --- |
+| Record before release; no second witness | Disclosure recorded in NVM before anything leaves; exact retries only; no second-witness exception | Keep `T` and resend identical bytes |
+| Chain check before creating a vault | None: it cannot see the chain | Check that the vault script was never paid, for every allocated index |
+| Funding output confirmed and unspent before arming | Checks that the previous transaction hashes to the outpoint and pays this vault, and that the outpoint matches any recorded funding; not that it is confirmed | Check on chain before WITHDRAW |
+| Vault directory: `origin.json`, `journal.jsonl`, `SPENT-DO-NOT-REUSE` | Its own NVM records instead | Keep them, written before broadcast |
+| Restoration: `RESTORED-SPEND-STATE-UNKNOWN`, chain check, typed attestation, `restore-unlocked` | A seed without history gets no allocation; one withdrawal per vault on the emergency path | Run the BIP's restore flow before using the emergency path |
+
+Neither client in this repository implements the host side yet, so a wallet
+built on them is derivation-compatible only. Within one install's history the
+device fails closed on its own side: it never releases a second, different
+disclosure for a vault. That guarantee ends with an app update or reinstall
+(Ledger erases the app's NVM), a device reset, or the same seed on another
+device. The app does **not** verify the PQB
 puzzle solutions: every release is a **classically bound, quantum-unverified
 transaction binding**, and the review says so. The co-signature stops anyone
 without a quantum computer from using the secrets for anything but the
 displayed transaction; it does not stop a quantum adversary, who learns `d`
 once `Q` is published.
 
-The host is trusted for: confirming that the funding output is confirmed before
-asking for a withdrawal, checking the chain before allocating on an imported
-seed, keeping the menu points private to the solver, and the PQB puzzle search
-and witness assembly.
+The host is also trusted for keeping the menu points private to the solver,
+and for the PQB puzzle search and witness assembly.
 
 ## Use with pqb
 
@@ -185,7 +205,7 @@ cd clients/python/tests && PQB_SPECULOS=http://127.0.0.1:5055 python -m unittest
 ```
 
 To regenerate the script template from a pqb checkout that builds construction
-`v1` (commit `bb2ddca` or later; needs `coincurve`). It fails if the layout no
+`v1` (commit `82c7cba` or later; needs `coincurve`). It fails if the layout no
 longer matches `pqb-core/src/template.rs`:
 
 ```bash
@@ -201,10 +221,12 @@ Speculos tests in the builder image on every push, and
 - **The BIP 85 path.** The app declares `83696968'/39'/0'/24'`, the BIP 85
   BIP 39 application's key space. Ledger has to accept an app deriving there;
   ask through the intro form before investing in a submission.
-- **NVM continuity.** An app update erases the records, which ends custody
-  conformance for every vault of the seed and leaves only the emergency path.
-  A continuity mechanism that survives updates (the BIP leaves it unspecified)
-  is the main gap.
+- **Host custody layer.** Custody conformance needs the BIP's vault directory,
+  journal, markers, chain checks and restoration flow on the host (see the
+  table above). Neither client has them yet.
+- **NVM continuity.** An app update erases the records and leaves only the
+  emergency path. With a conforming host, its journal carries that history and
+  the BIP's restoration flow covers the gap; without one, nothing does.
 - **Verified transaction binding.** Checking the three puzzle solutions on the
   device would remove the "quantum-unverified" caveat; the BIP leaves that
   verifier unspecified.

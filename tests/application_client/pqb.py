@@ -1,4 +1,4 @@
-"""Reference implementation of the PQB-v1 profile (BIP "PQB Wallet Secret Management").
+"""Reference implementation of the PQB-v1 profile (BIP "PQB Vault Secret Management").
 
 Independent of the app: the functional tests compare the device against it.
 Derivation follows the BIP's reference.py byte for byte; the script comes from

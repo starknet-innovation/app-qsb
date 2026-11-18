@@ -1,5 +1,5 @@
 //! PQB: a Ledger app holding the signing secrets of Post-Quantum Bitcoin (PQB)
-//! vaults, per the BIP "PQB Wallet Secret Management" (profile `PQB-v1`).
+//! vaults, per the BIP "PQB Vault Secret Management" (profile `PQB-v1`).
 //!
 //! Each vault's 109 one-time preimages, 44 menu scalars, co-signing key and
 //! deposit key derive from the device seed through BIP 85. The app exports

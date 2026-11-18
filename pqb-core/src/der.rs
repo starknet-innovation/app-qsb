@@ -75,6 +75,30 @@ pub fn encode(r: &[u8; 32], s: &[u8; 32]) -> DerSignature {
     out
 }
 
+/// Bitcoin Core's `IsValidSignatureEncoding`, on a signature with its hashtype
+/// byte: whether OP_CHECKSIG under DERSIG would accept `sig` as a signature.
+pub fn is_strict(sig: &[u8]) -> bool {
+    let n = sig.len();
+    if !(9..=73).contains(&n) || sig[0] != 0x30 || sig[1] as usize != n - 3 {
+        return false;
+    }
+    let lr = sig[3] as usize;
+    if 5 + lr >= n {
+        return false;
+    }
+    let ls = sig[5 + lr] as usize;
+    if lr + ls + 7 != n || sig[2] != 0x02 || lr == 0 || sig[4] & 0x80 != 0 {
+        return false;
+    }
+    if lr > 1 && sig[4] == 0 && sig[5] & 0x80 == 0 {
+        return false;
+    }
+    if sig[lr + 4] != 0x02 || ls == 0 || sig[lr + 6] & 0x80 != 0 {
+        return false;
+    }
+    !(ls > 1 && sig[lr + 6] == 0 && sig[lr + 7] & 0x80 == 0)
+}
+
 /// Re-encode `sig` minimally with S replaced by N - S when S > N/2.
 pub fn normalize_low_s(sig: &[u8]) -> Result<DerSignature> {
     if sig.len() < 8 || sig[0] != 0x30 || sig[1] as usize + 2 > sig.len() {

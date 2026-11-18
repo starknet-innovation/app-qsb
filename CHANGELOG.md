@@ -2,17 +2,16 @@
 
 ## 0.2.0 (unreleased)
 
-Retargeted from QSB to PQB, following the BIP draft "PQB Wallet Secret
+Retargeted from QSB to PQB, following the BIP draft "PQB Vault Secret
 Management" 0.2.0. Not compatible with 0.1.0: the app is now `PQB`.
 
 - Vault seeds derive from the device seed through BIP 85
   (`m/83696968'/39'/0'/24'/v'`) and the BIP's `PQB-v1` profile: 109 table
   entries, three signature menus, the ECDSA co-signing key and the deposit key,
-  matching pqb's construction version `v1` (commit `bb2ddca`; seed binding
-  `pqb/vault-seed|hybrid|PQB|v1|real|main`, pinning menu `r = 1`). The BIP draft
-  0.2.0 still names the earlier construction (commit `eccdd09`) and needs the
-  same update. The SLIP-0021 `QSB-HORS-v1` derivation is
-  removed; vaults created with it are not recoverable by this version.
+  matching pqb's construction version `v1` (commit `82c7cba`; seed binding
+  `pqb/vault-seed|hybrid|PQB|v1|real|main`, pinning menu `r = 1`). Every
+  `main` vector of the BIP is a host test. The SLIP-0021 `QSB-HORS-v1`
+  derivation is removed; vaults created with it are not recoverable by this version.
 - The device embeds pqb's 4,696-byte vault script template and builds each
   vault's exact script; GET_SCRIPT exports it.
 - Persistent allocation and disclosure records (`allocated`, `exposed`,
@@ -27,12 +26,18 @@ Management" 0.2.0. Not compatible with 0.1.0: the app is now `PQB`.
   refunds, signed with the vault's deposit key.
 - Menu-point export for the solver, after user authorization, and each stage's
   `r` (MENU_POINTS `P1 = 0x02`).
+- Allocation applies the BIP's DER screen and skips any index whose vault has
+  a commitment that parses as a strict DER signature.
+- Conformance: the app claims derivation compatibility. Custody conformance
+  needs the BIP's host-side vault directory, journal, chain checks and
+  restoration flow, which neither client implements yet.
 - Removed: BIP-84/49 wallet signing, QSB deposit and helper-input signing, and
   the QSB sign-in. New APDUs throughout (docs/apdu.md).
-- TypeScript client renamed `@pqb/ledger`, with disclosure verification and the
-  BIP's portable recovery manifest.
+- TypeScript client renamed `@pqb/ledger`, with disclosure verification and
+  device record parsing. The BIP's 0.1.0 recovery manifest is gone: 0.2.0
+  keeps state in a per-vault directory instead.
 - Python package `pqb_ledger` (clients/python): device-held pqb vaults, solver
-  export and spend assembly through unmodified pqb, pinned to commit `bb2ddca`.
+  export and spend assembly through unmodified pqb, pinned to commit `82c7cba`.
 
 ## 0.1.0
 

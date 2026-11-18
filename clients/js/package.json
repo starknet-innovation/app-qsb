@@ -1,7 +1,7 @@
 {
   "name": "@pqb/ledger",
   "version": "0.1.0",
-  "description": "Host client for the PQB Ledger app: vault commitments and scripts, deposit signing, verified disclosures, and the BIP recovery manifest.",
+  "description": "Host client for the PQB Ledger app: vault commitments and scripts, deposit signing, verified disclosures and device records.",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

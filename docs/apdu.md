@@ -24,13 +24,21 @@ construction version `v1` (see the README).
 
 ## Conformance
 
-The app claims **custody conformance** within one install's history: it is the
-single authoritative writer for each seed it holds, records allocations and
-disclosures in NVM before publishing a script or releasing anything, and fails
-closed on unreadable state. Its continuity guarantee ends with any of: an app
-update or reinstall (Ledger erases the app's NVM), a device reset, or the same
-seed on another device or app. After that the seed has no trustworthy history
-on the device (see [State](#state)).
+The app claims **derivation compatibility** with the BIP draft 0.2.0. Custody
+conformance is a claim about a whole wallet, and the BIP puts most of it on the
+host: chain checks before allocation and before a withdrawal, the vault
+directory with its journal and markers, and the restoration flow (see the
+README). Within one install's history the device does its own part: it records
+allocations and disclosures in NVM before publishing a script or releasing
+anything, fails closed on unreadable state, and never releases a second,
+different disclosure for a vault. That ends with any of: an app update or
+reinstall (Ledger erases the app's NVM), a device reset, or the same seed on
+another device or app. After that the seed has no trustworthy history on the
+device (see [State](#state)).
+
+ALLOCATE skips any index whose vault fails the BIP's DER screen (a commitment
+that parses as a strict DER signature), so such a vault is never offered for
+funding.
 
 It does **not** verify the three PQB puzzle solutions. Every disclosure is a
 **classically bound, quantum-unverified transaction binding**: the co-signature
@@ -128,7 +136,10 @@ portable recovery manifest from these and from GET_SCRIPT.
 
 No data. Response: `v (4) || R (32) || script hash (32)`.
 
-Reserves the next index `v = next_v` for a new vault. If this seed has no
+Reserves the next index `v` for a new vault: `next_v`, or the first index
+after it whose vault passes the BIP's DER screen (an index that fails is
+skipped for good; `next_v` moves past it). The host must still check that
+the returned vault's script was never paid, as the BIP requires. If this seed has no
 namespace on the device yet, the device first asks whether the seed has ever
 held PQB vaults (on any device or app install):
 
@@ -138,7 +149,7 @@ held PQB vaults (on any device or app install):
   New deposits need a fresh root, such as a new BIP-39 passphrase.
 
 The device then shows the vault number and fingerprint; on approval it records
-the vault `allocated`, raises `next_v` durably, and only then responds. `0x6A96`
+the vault `allocated`, raises `next_v` to `v + 1` durably, and only then responds. `0x6A96`
 when the record table is full, `0x6A95` in an unknown namespace.
 
 ## RETIRE

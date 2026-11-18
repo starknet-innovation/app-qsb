@@ -33,7 +33,7 @@ from .device import PqbDevice  # noqa: F401  (re-exported for callers)
 #: The pqb construction the app derives (BIP profile PQB-v1), and the upstream commit this adapter
 #: was checked against.
 PQB_VERSION = 'v1'
-PQB_COMMIT = 'bb2ddcad5b43ca5c603b3c4054c334cde7e19c47'
+PQB_COMMIT = '82c7cba684899e5a069f5f1baf4931c59111d345'
 
 #: A public placeholder seed: the shared structure comes from a build at it. Never funded.
 STRUCTURE_SEED = hashlib.sha256(b'pqb/device-lock-structure').digest()
