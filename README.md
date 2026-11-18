@@ -27,6 +27,7 @@ Bitcoin mainnet; treat this app the same way.
 | **Deposit address** | GET_DEPOSIT_ADDRESS | An ordinary P2WPKH address from the vault's deposit key; shown only for an allocated, never-funded vault |
 | **Fund the vault** (sweep) | SIGN_DEPOSIT | Every input spends the deposit address (amounts proven by previous transactions); the one output is exactly this vault's script; one funding per vault, recorded before signatures leave |
 | **Refund a deposit** | SIGN_DEPOSIT | Every input spends the deposit address; outputs are shown addresses |
+| **Sign in to QSB** | SIGN_IN | A BIP-322 signature by the deposit key, so the deposit address can sign in to qsb-app; only QSB's sign-in challenge for that address, with its origin, vault, fingerprint and expiry shown; records nothing |
 | **Withdraw** | WITHDRAW, REVEAL_READ | One disclosure per vault: the device builds the withdrawal `T` itself, shows destinations, amounts and fee, records the disclosure in NVM, then releases 8 + 9 table preimages, 3 menu signatures and its co-signature |
 | **Solver data** | MENU_POINTS | Menu points (never scalars), after the user authorizes the export |
 | **Retire** | RETIRE | Ends a vault for good |
@@ -220,8 +221,14 @@ Functional tests on Speculos, after building every device (or one with
 `--device nanosp`), from a git checkout:
 
 ```bash
-docker run --rm -v "$(pwd -P):/app" -w /app ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest bash -c "pip install -r tests/standalone/requirements.txt && pytest tests/standalone --tb=short --device all"
+docker run --rm -v "$(pwd -P):/app" -w /app ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest bash -c "pip install --break-system-packages -r tests/standalone/requirements.txt && python3 -m pytest tests/standalone --tb=short --device all"
 ```
+
+The image's Python is system-managed (PEP 668), hence
+`--break-system-packages`; it only touches the throwaway container. Ragger
+looks for a `.git` directory to find the project root, so in a `git worktree`
+(where `.git` is a file) run the tests from a copy whose `.git` is an empty
+directory.
 
 Add `--golden_run` to regenerate the screen snapshots after a UI change.
 
