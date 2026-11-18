@@ -27,6 +27,7 @@ class Ins(IntEnum):
     ALLOCATE = 0x20
     RETIRE = 0x21
     SIGN_DEPOSIT = 0x30
+    SIGN_IN = 0x31
     WITHDRAW = 0x40
     REVEAL_READ = 0x41
     MENU_POINTS = 0x42
@@ -353,6 +354,24 @@ class PqbCommandSender:
 
     def deposit_sign(self, index: int) -> bytes:
         return self.send(Ins.SIGN_DEPOSIT, DepositStep.SIGN, bytes([index])).data
+
+    # --- SIGN_IN -----------------------------------------------------------
+
+    @contextmanager
+    def sign_in(self, v: int, message: bytes) -> Generator[None, None, None]:
+        """Send a sign-in challenge in chunks; the last one waits for the review."""
+        header = idx(v) + struct.pack(">H", len(message))
+        first = message[:CHUNK - len(header)]
+        rest = chunks(message[len(first):])
+        if not rest:
+            with self.send_async(Ins.SIGN_IN, 0x00, header + first):
+                yield
+            return
+        self.send(Ins.SIGN_IN, 0x00, header + first)
+        for chunk in rest[:-1]:
+            self.send(Ins.SIGN_IN, 0x80, chunk)
+        with self.send_async(Ins.SIGN_IN, 0x80, rest[-1]):
+            yield
 
     # --- WITHDRAW ----------------------------------------------------------
 

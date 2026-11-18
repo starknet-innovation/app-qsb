@@ -22,7 +22,7 @@ mod ui;
 
 use handlers::withdraw::Approved;
 use handlers::Session;
-use handlers::{deposit, vault, withdraw};
+use handlers::{deposit, sign_in, vault, withdraw};
 use ledger_device_sdk::io::{self, init_comm, ApduHeader, Command, CommandResponse, Event, Reply};
 use ledger_device_sdk::nbgl::{NbglHomeAndSettings, NbglSpinner, StatusType};
 
@@ -110,6 +110,7 @@ pub enum Instruction {
     Allocate,
     Retire,
     SignDeposit(deposit::Step),
+    SignIn { first: bool },
     Withdraw(withdraw::Step),
     RevealRead { chunk: u8 },
     MenuPoints { op: u8 },
@@ -133,12 +134,13 @@ impl TryFrom<ApduHeader> for Instruction {
             (0x30, p1, 0) => deposit::Step::from_p1(p1)
                 .map(Instruction::SignDeposit)
                 .ok_or(AppSW::WrongP1P2),
+            (0x31, 0x00 | 0x80, 0) => Ok(Instruction::SignIn { first: h.p1 == 0 }),
             (0x40, p1, 0) => withdraw::Step::from_p1(p1)
                 .map(Instruction::Withdraw)
                 .ok_or(AppSW::WrongP1P2),
             (0x41, 0..=4, 0) => Ok(Instruction::RevealRead { chunk: h.p1 }),
             (0x42, 0..=2, 0) => Ok(Instruction::MenuPoints { op: h.p1 }),
-            (0x03 | 0x04 | 0x10..=0x14 | 0x20 | 0x21 | 0x30 | 0x40..=0x42, _, _) => {
+            (0x03 | 0x04 | 0x10..=0x14 | 0x20 | 0x21 | 0x30 | 0x31 | 0x40..=0x42, _, _) => {
                 Err(AppSW::WrongP1P2)
             }
             _ => Err(AppSW::InsNotSupported),
@@ -296,6 +298,10 @@ extern "C" fn sample_main(_arg0: u32) {
                 }
                 screen.home();
             }
+            Instruction::SignIn { .. } if reviewed && idle => {
+                ui::status(comm, StatusType::Message, ok);
+                screen.home();
+            }
             // Approved: the host reads the secrets behind a spinner.
             Instruction::Withdraw(withdraw::Step::Review) if ok => screen.disclosing(),
             Instruction::Withdraw(withdraw::Step::Review) if reviewed => {
@@ -339,6 +345,7 @@ fn handle<'a>(
         Instruction::Allocate => vault::allocate(command),
         Instruction::Retire => vault::retire(command),
         Instruction::SignDeposit(step) => deposit::handle(command, step, &mut app.session),
+        Instruction::SignIn { first } => sign_in::handle(command, first, &mut app.session),
         Instruction::Withdraw(step) => {
             withdraw::handle(command, step, &mut app.session, &mut app.approved)
         }

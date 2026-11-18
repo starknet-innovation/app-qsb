@@ -18,6 +18,7 @@ construction version `v1` (see the README).
 | `0x20` | [ALLOCATE](#allocate)                           | `0x00`                               | `0x00` |
 | `0x21` | [RETIRE](#retire)                               | `0x00`                               | `0x00` |
 | `0x30` | [SIGN_DEPOSIT](#sign_deposit)                   | step                                 | `0x00` |
+| `0x31` | [SIGN_IN](#sign_in)                             | `0x00` first, `0x80` more            | `0x00` |
 | `0x40` | [WITHDRAW](#withdraw)                           | step                                 | `0x00` |
 | `0x41` | [REVEAL_READ](#reveal_read)                     | chunk `0x00`–`0x04`                  | `0x00` |
 | `0x42` | [MENU_POINTS](#menu_points)                     | `0x00` authorize, `0x01` read, `0x02` stage `r` | `0x00` |
@@ -190,6 +191,53 @@ its previous transaction is complete, then OUTPUTS chunks, REVIEW, and one SIGN
 per input. Signatures are BIP-143, SIGHASH_ALL, RFC 6979, low S. A new START
 discards a session; any error ends it, except a SIGN of an input already
 signed (`0xB001`), and any other command while signatures are collected ends it.
+
+## SIGN_IN
+
+Signs the QSB service's sign-in challenge (`POST /v1/auth/challenge`) with
+BIP-322, as vault `v`'s deposit address, so that address can open a session
+with qsb-app. The app signs no other message.
+
+| P1     | Data |
+| ------ | ---- |
+| `0x00` | `v (4) \|\| message length (2) \|\| message bytes…` |
+| `0x80` | further message bytes |
+
+The message is 1 to 512 bytes. Intermediate chunks answer `0x9000` with no
+data; a continuation without a first chunk is `0xB001`. After the last byte the
+app checks the challenge, line by line:
+
+```text
+QSB Vault sign-in
+Origin: <origin>
+Address: <vault v's deposit address>
+Network: bitcoin-mainnet
+Nonce: <lowercase UUID>
+Expires: <YYYY-MM-DDTHH:MM:SS.sssZ>
+This signature authorizes this session only. It does not authorize a Bitcoin transaction.
+```
+
+The origin must be a web origin, `https://host[:port]` in lowercase (plain
+`http` only for `localhost` or `127.0.0.1`), so nothing can hide in user info or
+a path. Anything else is `0x6A80`. The device has no clock: it shows the expiry
+but can't enforce it; the server does.
+
+Allowed for any vault this seed allocated on this device, in any state
+(allocated, exposed, unknown or retired, including a retired record that was
+dropped), and for any vault of a seed with no history on this device: the owner
+may need a session after funding, for example to follow a withdrawal. Refused
+(`0x6A94`) only for an index a fresh namespace never handed out. Nothing is
+recorded.
+
+The device shows the origin (so the user can spot a phishing site relaying the
+real service's challenge), the vault number and fingerprint, the address and the
+expiry. On approval it returns `DER signature || 0x01`, by the deposit key `dd`
+over BIP-322's `to_sign` transaction (BIP-143 SIGHASH_ALL, amount 0, RFC 6979,
+low S). The host builds the BIP-322 "simple" signature: the witness
+`[signature, dd public key]`, serialized and base64-encoded; qsb-app verifies it
+with bip322-js in strict mode. `to_sign` spends an output of a virtual
+transaction that never exists, so the signature can't be replayed as a spend of
+the deposit address.
 
 ## WITHDRAW
 

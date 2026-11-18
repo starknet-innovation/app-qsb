@@ -17,6 +17,7 @@ use pqb_core::address;
 use pqb_core::amount::format_btc;
 use pqb_core::deposit::{self, Kind};
 use pqb_core::pqb::{fingerprint, MENU_WIDTHS, ROUND0, ROUND1, TABLE};
+use pqb_core::signin::SignIn;
 use pqb_core::withdraw::{self, Decision};
 
 use crate::crypto::DeviceHashes;
@@ -248,6 +249,50 @@ pub fn verify_deposit_address(comm: &mut Comm, v: u32, address: &str) -> bool {
         .review_title("Verify PQB\ndeposit address")
         .set_tag_value_list(&details)
         .show(comm, address)
+}
+
+/// A QSB sign-in challenge for vault `v`'s deposit address. Returns whether
+/// the user approved it.
+pub fn review_sign_in(
+    comm: &mut Comm,
+    sign_in: &SignIn,
+    v: u32,
+    root: &[u8; 32],
+    address: &str,
+) -> bool {
+    let number = format!("#{}", v);
+    let fp = fingerprint_str(root);
+    let fields = [
+        Field {
+            name: "Origin",
+            value: sign_in.origin,
+        },
+        Field {
+            name: "Vault",
+            value: number.as_str(),
+        },
+        Field {
+            name: "Fingerprint",
+            value: fp.as_str(),
+        },
+        Field {
+            name: "Address",
+            value: address,
+        },
+        Field {
+            name: "Expires",
+            value: sign_in.expires,
+        },
+    ];
+    NbglReview::new()
+        .tx_type(TransactionType::Message)
+        .titles(
+            "Review message\nto sign in to QSB",
+            "",
+            "Sign message\nto sign in to QSB",
+        )
+        .glyph(&PQB_SMALL)
+        .show(comm, &fields)
 }
 
 /// A sweep into the vault or a refund from its deposit address.

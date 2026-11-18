@@ -7,6 +7,7 @@ mod deposit;
 mod pqb;
 mod primitives;
 mod record;
+mod signin;
 mod withdraw;
 
 pub mod support {

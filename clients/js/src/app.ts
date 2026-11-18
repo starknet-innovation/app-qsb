@@ -30,6 +30,7 @@ export const INS = {
   ALLOCATE: 0x20,
   RETIRE: 0x21,
   SIGN_DEPOSIT: 0x30,
+  SIGN_IN: 0x31,
   WITHDRAW: 0x40,
   REVEAL_READ: 0x41,
   MENU_POINTS: 0x42,
@@ -38,6 +39,8 @@ const DEPOSIT_STEP = { START: 0, INPUT: 1, PREVTX: 2, OUTPUTS: 3, REVIEW: 4, SIG
 const WITHDRAW_STEP = { START: 0, PREVTX: 1, OUTPUTS: 2, REVIEW: 3 } as const;
 const DEPOSIT_KIND = { sweep: 0x01, refund: 0x02 } as const;
 const CHUNK = 255;
+/** The longest sign-in challenge the app takes. */
+const SIGN_IN_MAX = 512;
 const COMMITMENT_CHUNK = 12;
 const SCRIPT_CHUNK = 250;
 const MENU_POINT_CHUNK = 7;
@@ -253,6 +256,28 @@ export class PqbApp {
   /** Sign a refund from vault `v`'s deposit address; returns `DER || 0x01` per input. */
   signRefund(v: number, unsignedTx: Uint8Array, previousTxs: Uint8Array[]): Promise<Uint8Array[]> {
     return this.signDeposit("refund", v, unsignedTx, previousTxs);
+  }
+
+  /**
+   * Sign a QSB sign-in challenge (`POST /v1/auth/challenge`) as vault `v`'s
+   * deposit address, after the user approves it on the device. The app signs
+   * only that template, for that address. Returns the signature
+   * (`DER || 0x01`) and the BIP-322 "simple" signature to send to
+   * `/v1/auth/verify`: the witness `[signature, deposit public key]`, base64.
+   */
+  async signIn(v: number, message: string): Promise<{ address: string; signature: Uint8Array; bip322: string }> {
+    checkVault(v);
+    const bytes = new TextEncoder().encode(message);
+    if (bytes.length < 1 || bytes.length > SIGN_IN_MAX) throw new Error(`A sign-in challenge has 1 to ${SIGN_IN_MAX} bytes.`);
+    const { publicKey, address } = await this.getDepositAddress(v);
+    const data = concat(u32be(v), Uint8Array.of(bytes.length >> 8, bytes.length & 0xff), bytes);
+    let signature: Uint8Array = new Uint8Array();
+    for (let i = 0; i < data.length; i += CHUNK) {
+      signature = await this.exchange(INS.SIGN_IN, i === 0 ? 0x00 : 0x80, data.subarray(i, i + CHUNK));
+    }
+    checkSignature(signature);
+    const witness = concat(Uint8Array.of(2, signature.length), signature, Uint8Array.of(publicKey.length), publicKey);
+    return { address, signature, bip322: Buffer.from(witness).toString("base64") };
   }
 
   /**

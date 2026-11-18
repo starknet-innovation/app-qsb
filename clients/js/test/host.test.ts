@@ -479,3 +479,31 @@ test("signSweep streams START, INPUT + PREVTX per input, OUTPUTS, REVIEW and one
   await assert.rejects(app.signSweep(9, serializeTx({ ...parseTxOf(sweep), outputs: [{ amount: 1n, script: unhex("51") }, { amount: 1n, script: unhex("51") }] }), [other, legacy]), /outputs/);
   assert.equal(sent.length, 0);
 });
+
+test("signIn streams vault, length and challenge, and builds the BIP-322 witness", async () => {
+  const pub = ref.depositKey(new Uint8Array(32).fill(7)).publicKey;
+  const address = "bc1qexampleexampleexampleexampleexampleabc";
+  const sig = ref.cosign(SEED, new Uint8Array(32).fill(2));
+  const sent: [number, number, string][] = [];
+  const app = new PqbApp({
+    async send(_c, ins, p1, _p2, data = Buffer.alloc(0)) {
+      sent.push([ins, p1, data.toString("hex")]);
+      if (ins === 0x13) return ok(Buffer.concat([Buffer.from(pub), Buffer.from([address.length]), Buffer.from(address)]));
+      return ok(ins === 0x31 && sent.filter(([i]) => i === 0x31).length === 2 ? sig : new Uint8Array());
+    },
+  });
+  const message = "x".repeat(300);
+  const r = await app.signIn(5, message);
+  assert.equal(r.address, address);
+  assert.deepEqual(r.signature, sig);
+  const witness = Buffer.from(r.bip322, "base64");
+  assert.deepEqual(witness, Buffer.concat([Buffer.from([2, sig.length]), Buffer.from(sig), Buffer.from([33]), Buffer.from(pub)]));
+  const signIn = sent.filter(([ins]) => ins === 0x31);
+  assert.deepEqual(signIn.map(([, p1]) => p1), [0x00, 0x80]);
+  assert.equal(signIn[0][2].slice(0, 12), "00000005" + "012c");
+  assert.equal(signIn.map(([, , d]) => d).join("").length, 2 * (6 + 300));
+  // Too long for the app: refused before anything is sent.
+  sent.length = 0;
+  await assert.rejects(app.signIn(5, "x".repeat(513)), /512/);
+  assert.equal(sent.length, 0);
+});

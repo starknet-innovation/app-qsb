@@ -1,4 +1,5 @@
 pub mod deposit;
+pub mod sign_in;
 pub mod vault;
 pub mod withdraw;
 
@@ -9,4 +10,5 @@ pub enum Session {
     Idle,
     Deposit(Box<deposit::DepositSession>),
     Withdraw(Box<withdraw::WithdrawSession>),
+    SignIn(Box<pqb_core::signin::Collector>),
 }

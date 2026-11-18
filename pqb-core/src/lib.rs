@@ -24,6 +24,7 @@ pub mod record;
 pub mod script;
 pub mod sha1;
 pub mod sighash;
+pub mod signin;
 pub mod template;
 pub mod tx;
 pub mod u256;

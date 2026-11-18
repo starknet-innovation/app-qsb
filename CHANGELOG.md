@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- SIGN_IN (`0x31`): signs the QSB sign-in challenge with BIP-322 as a vault's
+  deposit address, so that address can sign in to qsb-app. Template only, as in
+  0.1.0, but keyed by vault instead of BIP-32 path; the review shows the origin,
+  vault number, fingerprint, address and expiry. Allowed in any vault state;
+  records nothing. The TypeScript client's `signIn` returns the BIP-322
+  "simple" signature.
+
 ## 0.2.0 (2026-11-18)
 
 Retargeted from QSB to PQB, following the BIP draft "PQB Vault Secret
