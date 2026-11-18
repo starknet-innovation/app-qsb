@@ -148,6 +148,54 @@ differently from the pinned commit.
 | [`clients/python/`](clients/python/) | `pqb_ledger`: drives the app from pqb, unmodified, so pqb's grinder and assembler work on device-held vaults. |
 | [`tools/`](tools/) | Icon generator, and the template generator (needs a pqb checkout). |
 
+## Install a release
+
+[Releases](https://github.com/starknet-innovation/app-qsb/releases) are
+pre-releases for testing. Ledger Live does not list the app, so it is
+side-loaded, and the device warns that it is not genuine. Use a device you
+keep for testing.
+
+Side-loading works on Nano S+, Stax, Flex and Apex P. Nano X does not accept
+side-loaded apps; its build is there for Speculos.
+
+1. Download your device's archive and `SHA256SUMS` from the release, check the
+   archive, and unpack it:
+
+   ```bash
+   shasum -a 256 -c SHA256SUMS --ignore-missing
+   ```
+
+   ```bash
+   tar -xzf pqb-0.2.0-flex.tar.gz && cd pqb-0.2.0-flex
+   ```
+
+2. Install Ledger's loader (Python 3) and udev rules on Linux, as described in
+   [ledgerblue](https://github.com/LedgerHQ/blue-loader-python):
+
+   ```bash
+   pip install ledgerblue
+   ```
+
+3. Connect the device, unlock it, stay on the dashboard, and quit Ledger Live.
+   Then load the app:
+
+   ```bash
+   python3 -m ledgerblue.runScript --scp --fileName app-pqb.apdu --elfFile app-pqb.elf
+   ```
+
+4. Approve the install on the device. If it shows an identifier (the
+   application hash), check it against `app-hash.txt` and the release notes
+   first.
+
+To remove it, use `ledgerctl delete PQB` from
+[ledgerctl](https://github.com/LedgerHQ/ledgerctl).
+
+**Reinstalling or updating the app erases its records.** Ledger clears an app's
+NVM when it is replaced, so every vault of the seed loses its device history
+and can then only be withdrawn on the emergency path (see
+[Disclosure lifecycle](#disclosure-lifecycle)). Withdraw funded vaults before
+you update.
+
 ## Build
 
 With Docker and Ledger's builder image:
