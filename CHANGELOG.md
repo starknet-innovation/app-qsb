@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-18)
 
 Retargeted from QSB to PQB, following the BIP draft "PQB Vault Secret
 Management" 0.2.0. Not compatible with 0.1.0: the app is now `PQB`.
