@@ -139,9 +139,16 @@ async function approveAllocate() {
   await select(/^Create$/);
 }
 
-test("allocate, then read the record back with getRecords", { skip: !API, timeout: 60_000 }, async () => {
+test("allocate, then read the record back with getRecords", { skip: !API, timeout: 60_000 }, async (t) => {
   const { transport, app } = await open();
   const before = await app.getState();
+  // Each run keeps its vault: records are never freed (a retired one keeps its slot),
+  // so a long-lived Speculos fills up after `capacity` runs. Restart it for a fresh store.
+  if (before.records >= before.capacity) {
+    await transport.close();
+    t.skip(`the device's record store is full (${before.records}/${before.capacity}); restart Speculos`);
+    return;
+  }
   // If the screens are not as expected, close the transport so the pending APDU does not hold the run open.
   const [allocated] = await Promise.all([app.allocate(), approveAllocate().catch(async (e) => (await transport.close(), Promise.reject(e)))]);
   const after = await app.getState();
