@@ -280,7 +280,8 @@ export type StateSummary = {
 export const RECORD_STATES = { 1: "allocated", 2: "exposed", 3: "retired", 4: "unknown" } as const;
 export type RecordState = (typeof RECORD_STATES)[keyof typeof RECORD_STATES];
 export const RECORD_FLAGS = { FUNDED: 0x01, DISCLOSED: 0x02, EMERGENCY: 0x04 } as const;
-export const RECORD_LEN = 256;
+/** A record as GET_STATE (P1 = 0x01) returns it: the 256-byte slot without its 5 bytes of padding. */
+export const RECORD_LEN = 251;
 
 /** One vault record as the device stores it (GET_STATE, P1 = 0x01). */
 export type VaultRecord = {

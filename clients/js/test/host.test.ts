@@ -14,6 +14,7 @@ import {
   fingerprint,
   legacySighashAll,
   parseRecord,
+  RECORD_LEN,
   scriptHash,
   serializeTx,
   parseTx as parseTxOf,
@@ -389,7 +390,7 @@ function recordBytes(o: {
   funding?: { txid: Uint8Array; vout: number; value: bigint };
   disclosure?: { request: DisclosureRequest; t: Uint8Array };
 }): Uint8Array {
-  const b = Buffer.alloc(256);
+  const b = Buffer.alloc(RECORD_LEN);
   b[0] = 1;
   b.set(WALLET, 1);
   b.writeUInt32BE(o.v, 17);
@@ -436,6 +437,15 @@ test("parseRecord reads the device layout", () => {
   assert.deepEqual(r.disclosure!.binding, sha256(t));
   assert.equal(records[1].funding, null);
   assert.equal(records[1].disclosure, null);
+});
+
+test("parseRecord takes the 251 bytes GET_STATE returns, not the 256-byte slot", () => {
+  assert.equal(RECORD_LEN, 251);
+  const b = recordBytes({ v: 0, state: 1, flags: 0 });
+  const padded = new Uint8Array(256);
+  padded.set(b);
+  assert.throws(() => parseRecord(padded), /Unexpected record layout/);
+  assert.throws(() => parseRecord(b.slice(0, 250)), /Unexpected record layout/);
 });
 
 // ---- SIGN_DEPOSIT -----------------------------------------------------------
