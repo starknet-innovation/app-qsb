@@ -3,9 +3,10 @@
  * Speculos's default seed (test/reference.ts, SPECULOS_MNEMONIC). Skipped unless
  * SPECULOS_API is set, e.g. SPECULOS_API=http://127.0.0.1:5000.
  *
- * Only commands that need no button press are covered here; flows with a
- * review screen (ALLOCATE, SIGN_DEPOSIT, WITHDRAW, MENU_POINTS authorization)
- * are exercised by the Ragger tests, which drive the screens.
+ * Mostly commands that need no button press. ALLOCATE is approved here by
+ * pressing buttons through the Speculos REST API (Nano only), to read records
+ * back from a real device; the other review flows (SIGN_DEPOSIT, WITHDRAW,
+ * MENU_POINTS authorization) are exercised by the Ragger tests.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -82,5 +83,92 @@ test("secrets and menu points need an approval", { skip: !API }, async () => {
   await assert.rejects(app.getMenuPoints(0, 1, 0), (e) => e instanceof PqbStatusError && e.status === "MENU_POINTS_UNAUTHORIZED");
   await assert.rejects(app.getMenuR(0, 0), (e) => e instanceof PqbStatusError && e.status === "MENU_POINTS_UNAUTHORIZED");
   await assert.rejects(app.exchange(0x10, 0, Uint8Array.of(0, 0, 0, 0, 150, 5)), (e) => e instanceof PqbStatusError && e.status === "INVALID_DATA");
+  await transport.close();
+});
+
+// ---- Driving the Nano screens over the Speculos REST API ---------------------
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The text lines on the current screen. */
+async function screen(): Promise<string[]> {
+  const r = await fetch(`${API}/events?currentscreenonly=true`);
+  const { events } = (await r.json()) as { events: { text: string }[] };
+  return events.map((e) => e.text);
+}
+
+/** Press a button, then wait (up to 2 s) for the screen to redraw so the next read sees the new page. */
+async function press(button: "left" | "right" | "both") {
+  const before = JSON.stringify(await screen());
+  await fetch(`${API}/button/${button}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "press-and-release" }),
+  });
+  for (let i = 0; i < 20 && JSON.stringify(await screen()) === before; i++) await sleep(100);
+}
+
+/** Wait until a line on screen matches one of `wants`; returns the screen. */
+async function waitFor(wants: RegExp[], timeoutMs = 10_000): Promise<string[]> {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    const lines = await screen();
+    if (lines.some((l) => wants.some((w) => w.test(l)))) return lines;
+    if (Date.now() > end) throw new Error(`Waited for ${wants.join(" or ")}; screen shows ${JSON.stringify(lines)}.`);
+    await sleep(100);
+  }
+}
+
+/** Page right until a line matches `target`, then press both buttons. */
+async function select(target: RegExp, maxPages = 20) {
+  for (let i = 0; i < maxPages; i++) {
+    if ((await screen()).some((l) => target.test(l))) return press("both");
+    await press("right");
+  }
+  throw new Error(`${target} never showed; screen shows ${JSON.stringify(await screen())}.`);
+}
+
+/** Approve ALLOCATE as the Ragger flow does: the first-use choice on a fresh device, then the "Create PQB" review. */
+async function approveAllocate() {
+  // A fresh seed first asks "First PQB vault on this seed?", with the answers on the next pages.
+  const first = await waitFor([/First PQB vault/, /Create PQB/]);
+  if (first.some((l) => /First PQB vault/.test(l))) {
+    await select(/^Yes, first use$/);
+    await waitFor([/Create PQB/]);
+  }
+  await select(/^Create$/);
+}
+
+test("allocate, then read the record back with getRecords", { skip: !API, timeout: 60_000 }, async (t) => {
+  const { transport, app } = await open();
+  const before = await app.getState();
+  // Each run keeps its vault: records are never freed (a retired one keeps its slot),
+  // so a long-lived Speculos fills up after `capacity` runs. Restart it for a fresh store.
+  if (before.records >= before.capacity) {
+    await transport.close();
+    t.skip(`the device's record store is full (${before.records}/${before.capacity}); restart Speculos`);
+    return;
+  }
+  // If the screens are not as expected, close the transport so the pending APDU does not hold the run open.
+  const [allocated] = await Promise.all([app.allocate(), approveAllocate().catch(async (e) => (await transport.close(), Promise.reject(e)))]);
+  const after = await app.getState();
+  assert.equal(after.records, before.records + 1);
+  assert.equal(after.nextV, allocated.v + 1);
+
+  const vault = await app.getVault(allocated.v);
+  assert.deepEqual(allocated.root, vault.root);
+  assert.deepEqual(allocated.scriptHash, vault.scriptHash);
+
+  const records = await app.getRecords();
+  assert.equal(records.length, after.records);
+  const record = records.find((r) => r.v === allocated.v);
+  assert.ok(record, `no record for vault ${allocated.v}`);
+  assert.equal(hex(record.walletId), WALLET_ID);
+  assert.equal(record.state, "allocated");
+  assert.equal(record.flags, 0);
+  assert.deepEqual(record.root, vault.root);
+  assert.deepEqual(record.scriptHash, vault.scriptHash);
+  assert.equal(record.funding, null);
+  assert.equal(record.disclosure, null);
   await transport.close();
 });

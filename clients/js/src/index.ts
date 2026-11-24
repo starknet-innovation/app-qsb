@@ -21,6 +21,7 @@ export {
   Q_INDEX,
   SCRIPT_LEN,
   RECORD_FLAGS,
+  RECORD_LEN,
   DisclosureError,
   checkRequest,
   commitmentRoot,
